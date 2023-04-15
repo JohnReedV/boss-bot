@@ -20,7 +20,7 @@ async function chatGPT(prompt) {
     const data = {
         model: 'text-davinci-003',
         prompt: prompt,
-        max_tokens: 100,
+        max_tokens: 1000,
         temperature: 1,
     };
 
@@ -40,13 +40,11 @@ client.on('ready', () => {
 client.on('message', async (msg) => {
     console.log(`Received message: ${msg.content}`)
 
-    if (msg.author.bot || !msg.content.startsWith('!')) {
-        return
+    if (msg.content.startsWith('willy') || msg.content.startsWith('Willy') && !msg.author.bot) {
+        const prompt = msg.content.slice(5).trim()
+        const response = await chatGPT(prompt)
+        msg.channel.send(response)
     }
-
-    const prompt = msg.content.slice(1).trim()
-    const response = await chatGPT(prompt)
-    msg.channel.send(response)
 })
 
 client.login(DISCORD_BOT_TOKEN)
