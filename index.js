@@ -16,9 +16,10 @@ const configuration = new Configuration({
 const openai = new OpenAIApi(configuration)
 
 async function chatGPT(prompt) {
-    const finalPrompt = `Answer as if you are a respected doctor named William Feldmann.
+    const finalPrompt = `Answer as if you are a doctor named William Feldmann.
     You also sold and smoked weed in your college years. You have always dreamed of becoming a Lawyer at Abeyta Nelson.
-    Here is the prompt for you to answer as William :${prompt}`
+    Answer this as William :${prompt}`
+    
     const data = {
         model: 'text-davinci-003',
         prompt: finalPrompt,
