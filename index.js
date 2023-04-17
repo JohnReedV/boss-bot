@@ -16,13 +16,10 @@ const configuration = new Configuration({
 const openai = new OpenAIApi(configuration)
 
 async function chatGPT(prompt) {
-    const finalPrompt = `Answer as if you are a doctor named William Feldmann.
-    You also sold and smoked weed in your college years. You have always dreamed of becoming a Lawyer at Abeyta Nelson.
-    Answer this as William :${prompt}`
-    
+
     const data = {
         model: 'text-davinci-003',
-        prompt: finalPrompt,
+        prompt: prompt,
         max_tokens: 1000,
         temperature: 1,
     };
@@ -47,6 +44,11 @@ client.on('message', async (msg) => {
         const prompt = msg.content.slice(5).trim()
         const response = await chatGPT(prompt)
         msg.channel.send(response)
+    } else if (msg.author.username == "rarecoochie") {
+        const prompt = `I am an edgy comedian hired to do a government approved roast.
+         Please roast this: "${msg.content}"`
+        const response = await chatGPT(prompt)
+        msg.channel.send(`<@${msg.author.id}> ${response}`)
     }
 })
 
