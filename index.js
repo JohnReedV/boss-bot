@@ -45,10 +45,21 @@ client.on('message', async (msg) => {
         const response = await chatGPT(prompt)
         msg.channel.send(response)
     } else if (msg.author.username == "rarecoochie") {
-        const prompt = `I am an edgy comedian hired to do a government approved roast.
-         Please roast this: "${msg.content}"`
+        const prompt = `You are a professional insulter.
+        Everything you say is known to be ironic. Insult this "${msg.content}"`
         const response = await chatGPT(prompt)
         msg.channel.send(`<@${msg.author.id}> ${response}`)
+    } else if (msg.author.username == "Dolphin") {
+        const prompt = `Reply as if you are madly in love with the prompt sender.
+        The prompt: "${msg.content}"`
+        const response = await chatGPT(prompt)
+        msg.channel.send(`<@${msg.author.id}> ${response}`)
+    } else if (msg.author.username == "Crawdog") {
+        const prompt = `Reply to this prompt as if you are eric cartman. Prompt: "${msg.content}"`
+        const response = await chatGPT(prompt)
+        msg.channel.send(`<@${msg.author.id}> ${response}`)
+    } else if (msg.author.username == "Paradox Rift") {
+        msg.channel.send(`<@${msg.author.id}> gay`)
     }
 })
 
