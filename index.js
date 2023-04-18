@@ -55,7 +55,7 @@ client.on('message', async (msg) => {
         const response = await chatGPT(prompt)
         msg.channel.send(`<@${msg.author.id}> ${response}`)
     } else if (msg.author.username == "Crawdog") {
-        const prompt = `You can only speak in code. Reply to this prompt: "${msg.content}"`
+        const prompt = `You can only speak in rust code. Reply to this prompt: "${msg.content}"`
         const response = await chatGPT(prompt)
         msg.channel.send(`<@${msg.author.id}> ${response}`)
     } else if (msg.author.username == "Paradox Rift") {
