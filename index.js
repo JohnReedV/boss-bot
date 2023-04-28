@@ -40,11 +40,11 @@ client.on('ready', () => {
 client.on('message', async (msg) => {
     console.log(`Received message: ${msg.content}`)
 
-    if (msg.content.startsWith('willy') || msg.content.startsWith('Willy') && !msg.author.bot) {
+    if (msg.content.startsWith('ye') || msg.content.startsWith('Ye') && !msg.author.bot) {
         const prompt = msg.content.slice(5).trim()
         const response = await chatGPT(prompt)
         msg.channel.send(response)
-    } else if (msg.author.username == "rarecoochie") {
+    } else if (msg.author.username == "pryceless3") {
         const prompt = `You are a professional insulter.
         Everything you say is known to be ironic. Insult this "${msg.content}"`
         const response = await chatGPT(prompt)
@@ -54,16 +54,17 @@ client.on('message', async (msg) => {
         The prompt: "${msg.content}"`
         const response = await chatGPT(prompt)
         msg.channel.send(`<@${msg.author.id}> ${response}`)
-    } else if (msg.author.username == "Crawdog") {
-        const prompt = `You can only speak in rust code. Reply to this prompt: "${msg.content}"`
+    } else if (msg.author.username == "Paradox Rift") {
+        const prompt = `You are a professional insulter.
+        Everything you say is known to be ironic. Insult this "${msg.content}"`
         const response = await chatGPT(prompt)
         msg.channel.send(`<@${msg.author.id}> ${response}`)
-    } else if (msg.author.username == "Paradox Rift") {
+    } else if (msg.author.username == "Crawdog") {
         const prompt = `Reply to this prompt as if you are a crazed conspiracy theorist.
         Prompt: "${msg.content}"`
         const response = await chatGPT(prompt)
         msg.channel.send(`<@${msg.author.id}> ${response}`)
-    } else if (msg.author.username == "King Unlucky! VII") {
+    } else if (msg.author.username == "efeld") {
         const prompt = `Reply to this prompt as if you are eric cartman. Prompt: "${msg.content}"`
         const response = await chatGPT(prompt)
         msg.channel.send(`<@${msg.author.id}> ${response}`)
