@@ -1,5 +1,7 @@
 const { Client, Intents } = require('discord.js')
 const { Configuration, OpenAIApi } = require('openai')
+const ytdl = require('ytdl-core')
+const { joinVoiceChannel, createAudioPlayer, createAudioResource, entersState, VoiceConnectionStatus } = require('@discordjs/voice');
 require('dotenv').config()
 
 const client = new Client({
@@ -33,17 +35,63 @@ async function chatGPT(prompt) {
     }
 }
 
+let connection;
+async function playAudio(msg, videoURL) {
+    if (!msg.member.voice.channel) {
+        return msg.reply('Please join a voice channel to play audio.');
+    }
+
+    connection = joinVoiceChannel({
+        channelId: msg.member.voice.channel.id,
+        guildId: msg.guild.id,
+        adapterCreator: msg.guild.voiceAdapterCreator,
+    })
+
+    try {
+        await entersState(connection, VoiceConnectionStatus.Ready, 60e3);
+
+        const audioStream = ytdl(videoURL, { filter: 'audioonly', quality: 'highestaudio', highWaterMark: 1 << 25 });
+        const audioResource = createAudioResource(audioStream);
+        const audioPlayer = createAudioPlayer();
+        audioPlayer.play(audioResource);
+        connection.subscribe(audioPlayer);
+
+        audioPlayer.on('error', error => {
+            console.error('Error playing audio:', error);
+            msg.reply('An error occurred while playing the audio.');
+        });
+    } catch (error) {
+        console.error('Error playing audio:', error);
+        msg.reply('Could not play audio from the provided link.');
+    }
+}
+
+async function stopAudioAndLeave(msg) {
+    const voiceChannel = msg.channelId
+
+    if (!voiceChannel) {
+        return msg.reply('I am not in a voice channel.')
+    }
+
+    connection.destroy()
+}
+
 client.on('ready', () => {
     console.log(`Logged in as ${client.user.tag}!`)
 })
 
-client.on('message', async (msg) => {
+client.on('messageCreate', async (msg) => {
     console.log(`Received message: ${msg.content}`)
 
     if (msg.content.startsWith('ye') || msg.content.startsWith('Ye') && !msg.author.bot) {
         const prompt = msg.content.slice(5).trim()
         const response = await chatGPT(prompt)
         msg.channel.send(response)
+    } else if (msg.content.startsWith('play') && !msg.author.bot) {
+        const videoURL = msg.content.split('play ')[1]
+        await playAudio(msg, videoURL)
+    } else if (msg.content.startsWith('leave') && !msg.author.bot) {
+        await stopAudioAndLeave(msg)
     } else if (msg.author.username == "pryceless3") {
         const prompt = `You are a professional insulter.
         Everything you say is known to be ironic. Insult this "${msg.content}"`

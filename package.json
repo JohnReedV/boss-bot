@@ -5,9 +5,12 @@
   "author": "John Reed <87283488+JohnReedV@users.noreply.github.com>",
   "license": "MIT",
   "dependencies": {
+    "@discordjs/voice": "^0.16.0",
     "discord": "^0.8.2",
-    "discord.js": "^13.0.0-dev.fdad14099779e61cb84dcd1cb2497e0e853a6144",
+    "discord.js": "^13.15.1",
     "dotenv": "^16.0.3",
-    "openai": "^3.2.1"
+    "openai": "^3.2.1",
+    "ytdl-core": "^4.11.4",
+    "ytdl-core-discord": "^1.3.1"
   }
 }
