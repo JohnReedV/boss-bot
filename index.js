@@ -1,7 +1,7 @@
 const { Client, Intents } = require('discord.js')
 const { Configuration, OpenAIApi } = require('openai')
-const ytdl = require('ytdl-core')
-const { joinVoiceChannel, createAudioPlayer, createAudioResource, entersState, VoiceConnectionStatus } = require('@discordjs/voice');
+const ytdl = require('discord-ytdl-core')
+const { joinVoiceChannel, createAudioPlayer, createAudioResource, entersState, VoiceConnectionStatus } = require('@discordjs/voice')
 require('dotenv').config()
 
 const client = new Client({
@@ -24,7 +24,7 @@ async function chatGPT(prompt) {
         prompt: prompt,
         max_tokens: 1000,
         temperature: 1,
-    };
+    }
 
     try {
         const response = await openai.createCompletion(data)
@@ -35,34 +35,87 @@ async function chatGPT(prompt) {
     }
 }
 
-let connection;
-async function playAudio(msg, videoURL) {
-    if (!msg.member.voice.channel) {
-        return msg.reply('Please join a voice channel to play audio.');
+let connection
+function isValidYouTubeURL(url) {
+    const validURLRegex = /^(https?:\/\/)?(www\.)?(youtube\.com|youtu\.?be)\/.+$/
+    return validURLRegex.test(url)
+}
+
+async function joinChannel(member, guild) {
+    console.log(member.voice.channel.id)
+    console.log(guild.id)
+    return new Promise((resolve, reject) => {
+        const connection = joinVoiceChannel({
+            channelId: member.voice.channel.id,
+            guildId: guild.id,
+            adapterCreator: guild.voiceAdapterCreator,
+        })
+
+        connection.on(VoiceConnectionStatus.Ready, () => {
+            resolve(connection)
+        })
+
+        connection.on(VoiceConnectionStatus.Disconnected, () => {
+            reject(new Error('Disconnected from the voice channel'))
+        })
+
+        connection.on(VoiceConnectionStatus.Failed, (error) => {
+            reject(error)
+        })
+
+        setTimeout(() => {
+            reject(new Error('Timeout while connecting to the voice channel'))
+        }, 60000)
+    })
+}
+
+async function playAudio(msg, client, videoURL) {
+    const guild = await client.guilds.fetch(msg.guildId)
+    const member = await guild.members.fetch(msg.author.id)
+
+    if (!member.voice.channel) {
+        return msg.reply('Please join a voice channel to play audio.')
     }
 
-    connection = joinVoiceChannel({
-        channelId: msg.member.voice.channel.id,
-        guildId: msg.guild.id,
-        adapterCreator: msg.guild.voiceAdapterCreator,
-    })
+    if (!isValidYouTubeURL(videoURL)) {
+        return msg.reply('Please provide a valid YouTube URL.')
+    }
+
+    if (connection && connection.state.status === VoiceConnectionStatus.Playing) {
+        return msg.reply('I am already playing audio in a voice channel.')
+    }
 
     try {
-        await entersState(connection, VoiceConnectionStatus.Ready, 60e3);
+        connection = await joinChannel(member, guild)
 
-        const audioStream = ytdl(videoURL, { filter: 'audioonly', quality: 'highestaudio', highWaterMark: 1 << 25 });
-        const audioResource = createAudioResource(audioStream);
-        const audioPlayer = createAudioPlayer();
-        audioPlayer.play(audioResource);
-        connection.subscribe(audioPlayer);
+        const audioStream = ytdl(videoURL, {
+            opusEncoded: true,
+            encoderArgs: ['-af', 'bass=g=10,dynaudnorm=f=200'],
+            fmt: 'webm',
+            filter: 'audioonly',
+            dlChunkSize: 0,
+            highWaterMark: 1 << 25,
+        })
+
+        const audioResource = createAudioResource(audioStream, { inputType: StreamType.Opus })
+        const audioPlayer = createAudioPlayer()
+
+        audioPlayer.play(audioResource)
+        const subscription = connection.subscribe(audioPlayer)
 
         audioPlayer.on('error', error => {
-            console.error('Error playing audio:', error);
-            msg.reply('An error occurred while playing the audio.');
-        });
+            console.error('Error playing audio:', error)
+            msg.reply('An error occurred while playing the audio.')
+        })
+
+        audioPlayer.on('idle', () => {
+            subscription.unsubscribe()
+            connection.destroy()
+        })
+
     } catch (error) {
-        console.error('Error playing audio:', error);
-        msg.reply('Could not play audio from the provided link.');
+        console.error('Error playing audio:', error)
+        msg.reply('Could not play audio from the provided link.')
     }
 }
 
@@ -89,7 +142,7 @@ client.on('messageCreate', async (msg) => {
         msg.channel.send(response)
     } else if (msg.content.startsWith('play') && !msg.author.bot) {
         const videoURL = msg.content.split('play ')[1]
-        await playAudio(msg, videoURL)
+        await playAudio(msg, client, videoURL)
     } else if (msg.content.startsWith('leave') && !msg.author.bot) {
         await stopAudioAndLeave(msg)
     } else if (msg.author.username == "pryceless3") {
