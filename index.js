@@ -145,27 +145,27 @@ client.on('messageCreate', async (msg) => {
         await playAudio(msg, client, videoURL)
     } else if (msg.content.startsWith('leave') && !msg.author.bot) {
         await stopAudioAndLeave(msg)
-    } else if (msg.author.username == "pryceless3") {
+    } else if (msg.author.username == "pryceless3" && randomTrue34Percent()) {
         const prompt = `You are a professional insulter.
         Everything you say is known to be ironic. Insult this "${msg.content}"`
         const response = await chatGPT(prompt)
         msg.channel.send(`<@${msg.author.id}> ${response}`)
-    } else if (msg.author.username == "Dolphin") {
+    } else if (msg.author.username == "Dolphin" && randomTrue34Percent()) {
         const prompt = `Reply as if you are madly in love with the prompt sender.
         The prompt: "${msg.content}"`
         const response = await chatGPT(prompt)
         msg.channel.send(`<@${msg.author.id}> ${response}`)
-    } else if (msg.author.username == "Paradox Rift") {
+    } else if (msg.author.username == "Paradox Rift" && randomTrue34Percent()) {
         const prompt = `You are a professional insulter.
         Everything you say is known to be ironic. Insult this "${msg.content}"`
         const response = await chatGPT(prompt)
         msg.channel.send(`<@${msg.author.id}> ${response}`)
-    } else if (msg.author.username == "Crawdog") {
+    } else if (msg.author.username == "Crawdog" && randomTrue34Percent()) {
         const prompt = `Reply to this prompt as if you are a crazed conspiracy theorist.
         Prompt: "${msg.content}"`
         const response = await chatGPT(prompt)
         msg.channel.send(`<@${msg.author.id}> ${response}`)
-    } else if (msg.author.username == "efeld") {
+    } else if (msg.author.username == "efeld" && randomTrue34Percent()) {
         const prompt = `Reply to this prompt as if you are eric cartman. Prompt: "${msg.content}"`
         const response = await chatGPT(prompt)
         msg.channel.send(`<@${msg.author.id}> ${response}`)
@@ -173,5 +173,9 @@ client.on('messageCreate', async (msg) => {
         msg.channel.send(`<@${msg.author.id}> gay`)
     }
 })
+
+function randomTrue34Percent() {
+    return Math.random() < 0.34;
+  }  
 
 client.login(DISCORD_BOT_TOKEN)
