@@ -63,6 +63,10 @@ client.on('messageCreate', async (msg) => {
         msg.channel.send(`<@${msg.author.id}> ${response}`)
     } else if (msg.author.username == "ozinator11") {
         msg.channel.send(`<@${msg.author.id}> gay`)
+    } else if (msg.author.username == "drlangeschlange" || msg.author.username == "TheDankGuy") {
+        const prompt = `Reply to this prompt as if you are having a discussion with a very important man: "${msg.content}"`
+        const response = await chatGPT(prompt)
+        msg.channel.send(`<@${msg.author.id}> ${response}`)
     }
 })
 
