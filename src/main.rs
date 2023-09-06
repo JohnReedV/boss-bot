@@ -1,14 +1,49 @@
 use openai_rust::{chat::ChatArguments, chat::Message as OpenAiMessage, Client as OpenAiClient};
+use regex::Regex;
 use serenity::{
     async_trait,
-    framework::standard::{macros::command, CommandResult, StandardFramework},
-    model::{channel::Message, gateway::GatewayIntents, gateway::Ready, prelude::ChannelId},
+    client::{Client, EventHandler},
+    framework::StandardFramework,
+    model::{channel::Message, gateway::GatewayIntents, prelude::ChannelId},
     prelude::*,
 };
-use std::env;
+use songbird::{SerenityInit, Songbird};
+use std::{env, sync::Arc};
+use tokio::process::Command as TokioCommand;
+
+pub struct SongbirdKey;
+
+impl TypeMapKey for SongbirdKey {
+    type Value = Arc<Songbird>;
+}
+
+#[tokio::main]
+async fn main() {
+    dotenv::dotenv().expect("Failed to load .env file");
+    let token = env::var("DISCORD_KEY").expect("Expected a token in the environment");
+
+    let framework = StandardFramework::new().configure(|c| c.prefix("~"));
+
+    let mut client = Client::builder(&token, GatewayIntents::all())
+        .event_handler(Handler)
+        .framework(framework)
+        .register_songbird()
+        .await
+        .expect("Err creating client");
+
+    let songbird: Arc<Songbird> = Songbird::serenity();
+    {
+        let mut data = client.data.write().await;
+        data.insert::<SongbirdKey>(songbird.clone());
+    }
+
+    let _ = client
+        .start()
+        .await
+        .map_err(|why| println!("Client ended: {:?}", why));
+}
 
 struct Handler;
-
 #[async_trait]
 impl EventHandler for Handler {
     async fn message(&self, ctx: Context, msg: Message) {
@@ -16,10 +51,43 @@ impl EventHandler for Handler {
 
         if msg.author.bot {
             return;
+        } else if message.starts_with("ye https://") || message.starts_with("Ye https://") {
+            message = message.split_at(3).1;
+
+            let guild_id = msg.guild_id.unwrap();
+            let guild = ctx.cache.guild(guild_id).unwrap();
+            let channel_id = guild
+                .voice_states
+                .get(&msg.author.id)
+                .and_then(|voice_state| voice_state.channel_id);
+            match channel_id {
+                Some(channel) => {
+                    let manager = songbird::get(&ctx)
+                        .await
+                        .expect("Songbird Voice client placed in at initialization.")
+                        .clone();
+
+                    let (_handler_lock, success) = manager.join(guild_id, channel).await;
+
+                    if success.is_ok() {
+                        match extract_youtube_url(message) {
+                            Ok(url) => {
+                                let _ = play_youtube(&ctx, msg, url)
+                                    .await
+                                    .expect("Expected to play_youtube");
+                            }
+                            Err(_) => {
+                                let _ = msg.reply(&ctx, "Bad URL").await;
+                            }
+                        }
+                    }
+                }
+                None => {
+                    let _ = msg.reply(&ctx, "Join a voice channel noob").await;
+                }
+            }
         } else if message.starts_with("Ye") || message.starts_with("ye") {
             message = message.split_at(3).1;
-            println!("New message: {}", message);
-
             let api_key: String = env::var("OPENAI_KEY").expect("Expected OPENAI_KEY to be set");
             let prompt: String = message.to_string();
 
@@ -29,20 +97,50 @@ impl EventHandler for Handler {
             })
             .await
             .unwrap();
-            println!("response: {}", response);
-            let _ = send_large_message(&ctx, msg.channel_id, &response).await.expect("Expected to send_large_message");
 
+            let _ = send_large_message(&ctx, msg.channel_id, &response)
+                .await
+                .expect("Expected to send_large_message");
         }
-    }
-
-    async fn ready(&self, _: Context, ready: Ready) {
-        println!("Bot is ready: {}", ready.user.name);
     }
 }
 
-#[command]
-async fn ping(ctx: &Context, msg: &Message) -> CommandResult {
-    msg.reply(ctx, "Pong!").await?;
+async fn play_youtube(
+    ctx: &Context,
+    msg: Message,
+    url: String,
+) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    let guild = msg.guild(&ctx.cache).unwrap();
+    let guild_id = guild.id;
+
+    let manager = songbird::get(ctx)
+        .await
+        .expect("Songbird Voice client placed in at initialisation.")
+        .clone();
+
+    if let Some(handler_lock) = manager.get(guild_id) {
+        let mut handler = handler_lock.lock().await;
+
+        let output = TokioCommand::new("yt-dlp")
+            .arg("-f")
+            .arg("bestaudio")
+            .arg("-g")
+            .arg(&url)
+            .output()
+            .await?;
+        let audio_url = String::from_utf8(output.stdout)?.trim().to_string();
+
+        let source = match songbird::ffmpeg(audio_url).await {
+            Ok(source) => source,
+            Err(why) => {
+                println!("Err starting source: {:?}", why);
+                let _ = msg.channel_id.say(&ctx.http, "Can't play that one").await;
+                return Ok(());
+            }
+        };
+
+        handler.play_source(source);
+    }
 
     Ok(())
 }
@@ -61,26 +159,11 @@ async fn chat_gpt(api_key: &str, prompt: &str) -> String {
     return format!("{}", res.choices[0].message.content.clone());
 }
 
-#[tokio::main]
-async fn main() {
-    dotenv::dotenv().expect("Failed to load .env file");
-    let token: String = env::var("DISCORD_KEY").expect("Expected DISCORD_KEY to be set");
-
-    let framework: StandardFramework = StandardFramework::new().configure(|c| c.prefix("~"));
-
-    let mut client: Client = Client::builder(&token, GatewayIntents::all())
-        .framework(framework)
-        .event_handler(Handler)
-        .intents(GatewayIntents::all())
-        .await
-        .expect("Error creating client");
-
-    if let Err(why) = client.start().await {
-        println!("Client error: {:?}", why);
-    }
-}
-
-async fn send_large_message(ctx: &Context, channel_id: ChannelId, message: &str) -> serenity::Result<()> {
+async fn send_large_message(
+    ctx: &Context,
+    channel_id: ChannelId,
+    message: &str,
+) -> serenity::Result<()> {
     let max_length = 1950;
     let mut start = 0;
     let mut end = std::cmp::min(max_length, message.len());
@@ -94,4 +177,29 @@ async fn send_large_message(ctx: &Context, channel_id: ChannelId, message: &str)
     }
 
     Ok(())
+}
+
+fn extract_youtube_url(input: &str) -> Result<String, Box<dyn std::error::Error + Send>> {
+    let start_index = input.find("https://www.youtube.com/watch?v=");
+    match start_index {
+        Some(start) => {
+            let potential_url = &input[start..];
+            if is_valid_youtube_url(potential_url) {
+                return Ok(potential_url.to_string());
+            }
+            Err(Box::new(std::io::Error::new(
+                std::io::ErrorKind::Other,
+                "No valid YouTube URL found",
+            )))
+        }
+        None => Err(Box::new(std::io::Error::new(
+            std::io::ErrorKind::Other,
+            "No valid YouTube URL found",
+        ))),
+    }
+}
+
+fn is_valid_youtube_url(url: &str) -> bool {
+    let re = Regex::new(r"https?://(www\.)?youtube\.com/watch\?v=[a-zA-Z0-9_-]+").unwrap();
+    return re.is_match(url);
 }
