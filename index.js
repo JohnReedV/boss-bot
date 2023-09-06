@@ -41,32 +41,32 @@ client.on('messageCreate', async (msg) => {
         const prompt = `You are a professional insulter.
         Everything you say is known to be ironic. Insult this "${msg.content}"`
         const response = await chatGPT(prompt)
-        msg.channel.send(`<@${msg.author.id}> ${response}`)
+        msg.channel.send(`<@${msg.author.id}> ${response.content}`)
     } else if (msg.author.username == "Dolphin") {
         const prompt = `Reply as if you are madly in love with the prompt sender.
         The prompt: "${msg.content}"`
         const response = await chatGPT(prompt)
-        msg.channel.send(`<@${msg.author.id}> ${response}`)
+        msg.channel.send(`<@${msg.author.id}> ${response.content}`)
     } else if (msg.author.username == "Paradox Rift") {
         const prompt = `You are a professional insulter.
         Everything you say is known to be ironic. Insult this "${msg.content}"`
         const response = await chatGPT(prompt)
-        msg.channel.send(`<@${msg.author.id}> ${response}`)
+        msg.channel.send(`<@${msg.author.id}> ${response.content}`)
     } else if (msg.author.username == "Crawdog") {
         const prompt = `Reply to this prompt as if you are a crazed conspiracy theorist.
         Prompt: "${msg.content}"`
         const response = await chatGPT(prompt)
-        msg.channel.send(`<@${msg.author.id}> ${response}`)
+        msg.channel.send(`<@${msg.author.id}> ${response.content}`)
     } else if (msg.author.username == "efeld") {
         const prompt = `Reply to this prompt as if you are eric cartman. Prompt: "${msg.content}"`
         const response = await chatGPT(prompt)
-        msg.channel.send(`<@${msg.author.id}> ${response}`)
+        msg.channel.send(`<@${msg.author.id}> ${response.content}`)
     } else if (msg.author.username == "ozinator11") {
         msg.channel.send(`<@${msg.author.id}> gay`)
     } else if (msg.author.username == "drlangeschlange" || msg.author.username == "TheDankGuy") {
         const prompt = `Reply to this prompt as if you are having a discussion with a very important man: "${msg.content}"`
         const response = await chatGPT(prompt)
-        msg.channel.send(`<@${msg.author.id}> ${response}`)
+        msg.channel.send(`<@${msg.author.id}> ${response.content}`)
     }
 })
 
