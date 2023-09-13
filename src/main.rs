@@ -13,6 +13,7 @@ use std::{collections::VecDeque, env, process::Command, sync::Arc, time::Duratio
 use tokio::{process::Command as TokioCommand, sync::Mutex, time::sleep};
 
 lazy_static! {
+    #[derive(Debug)]
     static ref VIDEO_QUEUE: Mutex<VecDeque<String>> = Mutex::new(VecDeque::new());
 }
 
@@ -28,7 +29,6 @@ async fn main() {
     let token = env::var("DISCORD_KEY").expect("Expected a token in the environment");
 
     let framework = StandardFramework::new().configure(|c| c.prefix("~"));
-
     let mut client = Client::builder(&token, GatewayIntents::all())
         .event_handler(Handler::default())
         .framework(framework)
@@ -63,8 +63,6 @@ impl Default for Handler {
 #[async_trait]
 impl EventHandler for Handler {
     async fn message(&self, ctx: Context, msg: Message) {
-        let mut playing: tokio::sync::MutexGuard<'_, bool> = self.playing.lock().await;
-
         let mut message: &str = msg.content.trim();
         if msg.author.bot {
             return;
@@ -104,7 +102,9 @@ impl EventHandler for Handler {
                                     }
 
                                     if should_continue {
-                                        if !*playing { //DOES WORK??
+                                        let mut playing: tokio::sync::MutexGuard<'_, bool> =
+                                            self.playing.lock().await;
+                                        if !*playing {
                                             *playing = true;
                                             let _ = play_youtube(&ctx, msg.clone()).await;
                                             let _ = sleep_for_video_duration(&url).await;
@@ -125,6 +125,22 @@ impl EventHandler for Handler {
                     let _ = msg.reply(&ctx, "Bad URL").await;
                 }
             }
+        } else if message.starts_with("ye q") || message.starts_with("Ye q") {
+            let queue = get_video_queue().lock().await;
+            let mut name_vec: VecDeque<String> = VecDeque::new();
+
+            for item in &*queue {
+                let title = get_video_title(&item).await.unwrap();
+                let final_title = title.trim().to_string();
+                name_vec.push_back(final_title);
+            }
+
+            msg.channel_id
+                .say(&ctx.http, format!("{:#?}", name_vec))
+                .await
+                .unwrap();
+        } else if message.starts_with("ye skip") || message.starts_with("Ye skip") {
+            let _ = skip_current_song(&ctx, msg, self.playing.clone()).await;
         } else if message.starts_with("Ye") || message.starts_with("ye") {
             message = message.split_at(3).1;
             println!("Got message: {}", message);
@@ -182,7 +198,7 @@ async fn play_youtube(
                 }
             };
 
-            handler.play_source(source);
+            handler.play_only_source(source);
         }
     }
 
@@ -248,6 +264,26 @@ fn is_valid_youtube_url(url: &str) -> bool {
     return re.is_match(url);
 }
 
+pub fn get_video_queue() -> &'static Mutex<VecDeque<String>> {
+    &VIDEO_QUEUE
+}
+
+async fn get_video_title(video_url: &String) -> Result<String, std::io::Error> {
+    let output = Command::new("yt-dlp")
+        .arg("--get-title")
+        .arg(video_url)
+        .output()?;
+
+    if output.status.success() {
+        return Ok(String::from_utf8(output.stdout).unwrap());
+    } else {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::Other,
+            "yt-dlp failed to get video duration",
+        ));
+    }
+}
+
 async fn sleep_for_video_duration(video_url: &str) -> std::io::Result<()> {
     let output = Command::new("yt-dlp")
         .arg("--get-duration")
@@ -287,6 +323,31 @@ async fn sleep_for_video_duration(video_url: &str) -> std::io::Result<()> {
             std::io::ErrorKind::Other,
             "yt-dlp failed to get video duration",
         ));
+    }
+
+    Ok(())
+}
+
+async fn skip_current_song(
+    ctx: &Context,
+    msg: Message,
+    playing: Arc<Mutex<bool>>,
+) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    let guild = msg.guild(&ctx.cache).unwrap();
+    let guild_id = guild.id;
+
+    let manager = songbird::get(ctx)
+        .await
+        .expect("Songbird Voice client placed in at initialization.")
+        .clone();
+
+    if let Some(handler_lock) = manager.get(guild_id) {
+        let mut handler = handler_lock.lock().await;
+
+        handler.stop();
+
+        let mut playing_guard = playing.lock().await;
+        *playing_guard = false;
     }
 
     Ok(())
