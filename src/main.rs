@@ -8,6 +8,7 @@ use serenity::{
     model::{channel::Message, gateway::GatewayIntents, prelude::ChannelId},
     prelude::*,
 };
+use songbird::input::ffmpeg_optioned;
 use songbird::{SerenityInit, Songbird};
 use std::{collections::VecDeque, env, process::Command, sync::Arc, time::Duration};
 use tokio::{process::Command as TokioCommand, sync::Mutex, time::sleep};
@@ -106,8 +107,15 @@ impl EventHandler for Handler {
                                             self.playing.lock().await;
                                         if !*playing {
                                             *playing = true;
-                                            let _ = play_youtube(&ctx, msg.clone()).await;
-                                            let _ = sleep_for_video_duration(&url).await;
+                                            let ctx_clone = ctx.clone();
+                                            let msg_clone = msg.clone();
+                                            tokio::spawn(async move {
+                                                play_youtube(&ctx_clone, msg_clone.clone())
+                                                    .await
+                                                    .unwrap();
+                                            });
+                                            let duration: Duration = get_video_duration(&url).await.unwrap();
+                                            sleep(duration).await;
                                             *playing = false;
                                         }
                                     } else {
@@ -189,16 +197,31 @@ async fn play_youtube(
 
             let audio_url = String::from_utf8(output.stdout)?.trim().to_string();
 
-            let source = match songbird::ffmpeg(audio_url).await {
-                Ok(source) => source,
-                Err(why) => {
-                    println!("Err starting source: {:?}", why);
-                    let _ = msg.channel_id.say(&ctx.http, "Can't play that one").await;
-                    return Ok(());
-                }
-            };
+            let ffmpeg_options: [&str; 6] = [ 
+                "-reconnect",
+                "1",
+                "-reconnect_streamed",
+                "1",
+                "-reconnect_delay_max",
+                "5",
+            ];
 
-            handler.play_only_source(source);
+            let audio_options: [&str; 9] = [
+                "-f",
+                "s16le",
+                "-ac",
+                "2",
+                "-ar",
+                "48000",
+                "-acodec",
+                "pcm_f32le",
+                "-",
+            ];
+
+            let source = ffmpeg_optioned(audio_url, &ffmpeg_options, &audio_options).await?;
+            let (track, _track_handle) = songbird::create_player(source);
+
+            handler.play_only(track);
         }
     }
 
@@ -284,7 +307,7 @@ async fn get_video_title(video_url: &String) -> Result<String, std::io::Error> {
     }
 }
 
-async fn sleep_for_video_duration(video_url: &str) -> std::io::Result<()> {
+async fn get_video_duration(video_url: &str) -> std::io::Result<Duration> {
     let output = Command::new("yt-dlp")
         .arg("--get-duration")
         .arg(video_url)
@@ -317,15 +340,13 @@ async fn sleep_for_video_duration(video_url: &str) -> std::io::Result<()> {
             }
         };
 
-        sleep(duration).await;
+        Ok(duration)
     } else {
         return Err(std::io::Error::new(
             std::io::ErrorKind::Other,
             "yt-dlp failed to get video duration",
         ));
     }
-
-    Ok(())
 }
 
 async fn skip_current_song(
