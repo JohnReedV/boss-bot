@@ -5,12 +5,24 @@ use serenity::{
     async_trait,
     client::{Client, EventHandler},
     framework::StandardFramework,
-    model::{channel::Message, gateway::GatewayIntents, prelude::ChannelId},
+    model::{
+        channel::Message,
+        gateway::GatewayIntents,
+        prelude::{ChannelId, GuildId},
+    },
     prelude::*,
 };
-use songbird::input::ffmpeg_optioned;
-use songbird::{SerenityInit, Songbird};
-use std::{collections::VecDeque, env, process::Command, sync::Arc, time::Duration};
+use songbird::{input::ffmpeg_optioned, SerenityInit, Songbird};
+use std::{
+    collections::VecDeque,
+    env,
+    process::Command,
+    sync::{
+        atomic::{AtomicBool, Ordering},
+        Arc,
+    },
+    time::Duration,
+};
 use tokio::{process::Command as TokioCommand, sync::Mutex, time::sleep};
 
 lazy_static! {
@@ -51,16 +63,17 @@ async fn main() {
 
 struct Handler {
     pub playing: Arc<Mutex<bool>>,
+    pub skip: Arc<AtomicBool>,
 }
 
 impl Default for Handler {
     fn default() -> Self {
         Handler {
             playing: Arc::new(Mutex::new(false)),
+            skip: Arc::new(AtomicBool::new(false)),
         }
     }
 }
-
 #[async_trait]
 impl EventHandler for Handler {
     async fn message(&self, ctx: Context, msg: Message) {
@@ -103,20 +116,39 @@ impl EventHandler for Handler {
                                     }
 
                                     if should_continue {
-                                        let mut playing: tokio::sync::MutexGuard<'_, bool> =
-                                            self.playing.lock().await;
-                                        if !*playing {
-                                            *playing = true;
-                                            let ctx_clone = ctx.clone();
-                                            let msg_clone = msg.clone();
-                                            tokio::spawn(async move {
-                                                play_youtube(&ctx_clone, msg_clone.clone())
-                                                    .await
-                                                    .unwrap();
-                                            });
-                                            let duration: Duration = get_video_duration(&url).await.unwrap();
-                                            sleep(duration).await;
-                                            *playing = false;
+                                        match self.playing.try_lock() {
+                                            Ok(mut playing) => {
+                                                if !*playing {
+                                                    *playing = true;
+                                                    let ctx_clone = ctx.clone();
+                                                    let msg_clone = msg.clone();
+                                                    tokio::spawn(async move {
+                                                        play_youtube(&ctx_clone, msg_clone.clone())
+                                                            .await
+                                                            .unwrap();
+                                                    });
+                                                    let duration: Duration =
+                                                        get_video_duration(&url).await.unwrap();
+                                                    tokio::select! {
+                                                        _ = sleep(duration) => {
+                                                            *playing = false;
+                                                        }
+                                                        _ = async {
+                                                            loop {
+                                                                tokio::time::sleep(Duration::from_millis(100)).await;
+                                                                if self.skip.load(Ordering::SeqCst) {
+                                                                    self.skip.store(false, Ordering::SeqCst);
+                                                                    *playing = false;
+                                                                    break;
+                                                                }
+                                                            }
+                                                        } => {
+                                                            *playing = false;
+                                                        }
+                                                    }
+                                                }
+                                            }
+                                            Err(_) => {}
                                         }
                                     } else {
                                         break;
@@ -134,21 +166,29 @@ impl EventHandler for Handler {
                 }
             }
         } else if message.starts_with("ye q") || message.starts_with("Ye q") {
+            println!("Got message: {}", message);
             let queue = get_video_queue().lock().await;
-            let mut name_vec: VecDeque<String> = VecDeque::new();
+            let mut name_str = String::from("🎵 **Queue** 🎵\n```markdown\n");
 
-            for item in &*queue {
+            for (index, item) in queue.iter().enumerate() {
                 let title = get_video_title(&item).await.unwrap();
-                let final_title = title.trim().to_string();
-                name_vec.push_back(final_title);
+                let final_title = title.trim();
+                name_str.push_str(&format!("{}: {}\n", index + 1, final_title));
             }
+            name_str.push_str("```");
 
-            msg.channel_id
-                .say(&ctx.http, format!("{:#?}", name_vec))
+            msg.channel_id.say(&ctx.http, name_str).await.unwrap();
+        } else if message.starts_with("ye skip") || message.starts_with("Ye skip") {
+            println!("Got message: {}", message);
+            let guild_id = msg.guild_id.unwrap();
+            let manager = songbird::get(&ctx)
+                .await
+                .expect("Songbird Voice client placed in at initialization.")
+                .clone();
+
+            skip_current_song(guild_id, manager, self.clone())
                 .await
                 .unwrap();
-        } else if message.starts_with("ye skip") || message.starts_with("Ye skip") {
-            let _ = skip_current_song(&ctx, msg, self.playing.clone()).await;
         } else if message.starts_with("Ye") || message.starts_with("ye") {
             message = message.split_at(3).1;
             println!("Got message: {}", message);
@@ -197,7 +237,7 @@ async fn play_youtube(
 
             let audio_url = String::from_utf8(output.stdout)?.trim().to_string();
 
-            let ffmpeg_options: [&str; 6] = [ 
+            let ffmpeg_options: [&str; 6] = [
                 "-reconnect",
                 "1",
                 "-reconnect_streamed",
@@ -225,6 +265,20 @@ async fn play_youtube(
         }
     }
 
+    Ok(())
+}
+
+async fn skip_current_song(
+    guild_id: GuildId,
+    manager: Arc<Songbird>,
+    app: &Handler,
+) -> Result<(), Box<dyn std::error::Error>> {
+    if let Some(handler_lock) = manager.get(guild_id) {
+        let mut handler = handler_lock.lock().await;
+        handler.stop();
+    }
+
+    app.skip.store(true, Ordering::SeqCst);
     Ok(())
 }
 
@@ -347,29 +401,4 @@ async fn get_video_duration(video_url: &str) -> std::io::Result<Duration> {
             "yt-dlp failed to get video duration",
         ));
     }
-}
-
-async fn skip_current_song(
-    ctx: &Context,
-    msg: Message,
-    playing: Arc<Mutex<bool>>,
-) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-    let guild = msg.guild(&ctx.cache).unwrap();
-    let guild_id = guild.id;
-
-    let manager = songbird::get(ctx)
-        .await
-        .expect("Songbird Voice client placed in at initialization.")
-        .clone();
-
-    if let Some(handler_lock) = manager.get(guild_id) {
-        let mut handler = handler_lock.lock().await;
-
-        handler.stop();
-
-        let mut playing_guard = playing.lock().await;
-        *playing_guard = false;
-    }
-
-    Ok(())
 }
