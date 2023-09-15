@@ -88,6 +88,15 @@ impl EventHandler for Handler {
             println!("Got yt message: {}", message);
             match extract_youtube_url(message) {
                 Ok(url) => {
+                    if let Err(why) = msg.delete(&ctx).await {
+                        println!("Error deleting message: {:?}", why);
+                    }
+                    
+                    let video_title = get_video_title(&url).await.unwrap();
+                    let clean_video_title = video_title.replace("\n", "");
+                    let new_content = format!("Added to queue: ```{}```", clean_video_title);
+                    msg.channel_id.say(&ctx.http, new_content).await.unwrap();
+                    
                     {
                         let mut queue = VIDEO_QUEUE.lock().await;
                         queue.push_back(url.clone());
