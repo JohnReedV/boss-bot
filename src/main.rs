@@ -180,7 +180,7 @@ impl EventHandler for Handler {
             if let Err(why) = msg.delete(&ctx).await {
                 println!("Error deleting message: {:?}", why);
             }
-            
+
             let queue = get_video_queue().lock().await;
             let mut name_str = String::from("🎵 **Queue** 🎵\n```markdown\n");
             let mut tracker = false;
@@ -224,13 +224,13 @@ impl EventHandler for Handler {
                 println!("Error deleting message: {:?}", why);
             }
 
-            let help_message = "🤖 **Bot Commands** 🤖\n\
+            let help_message = "💅🏻 **Woman Commands** ☕\n\
             ```markdown\n\
             1. !https://<URL>  -- Add a YouTube video to the queue\n\
             2. !q              -- Display the current audio queue\n\
             3. !skip           -- Skip the currently playing song\n\
             4. !leave          -- Leave the voice channel and clear the queue\n\
-            5. !Help           -- Displays this page\n\
+            5. !help           -- Displays this page\n\
             6. !               -- Everything proceeding from \"!\" is a GPT prompt\n\
             ```";
             let _ = msg.channel_id.say(&ctx.http, help_message).await;
