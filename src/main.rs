@@ -199,7 +199,7 @@ impl EventHandler for Handler {
                 .await
                 .unwrap();
         } else if message.starts_with("!") {
-            message = message.split_at(3).1;
+            message = message.split_at(2).1;
             println!("Got message: {}", message);
 
             let api_key: String = env::var("OPENAI_KEY").expect("Expected OPENAI_KEY to be set");
