@@ -82,8 +82,8 @@ impl EventHandler for Handler {
             return;
         }
 
-        if message.starts_with("ye https://") || message.starts_with("Ye https://") {
-            message = message.split_at(3).1;
+        if message.starts_with("! https://") || message.starts_with("!https://") {
+            message = message.split_at(1).1;
 
             println!("Got yt message: {}", message);
             match extract_youtube_url(message) {
@@ -174,7 +174,7 @@ impl EventHandler for Handler {
                     let _ = msg.reply(&ctx, "Bad URL").await;
                 }
             }
-        } else if message.starts_with("ye q") || message.starts_with("Ye q") {
+        } else if message.starts_with("! q") || message.starts_with("!q") {
             println!("Got message: {}", message);
             let queue = get_video_queue().lock().await;
             let mut name_str = String::from("🎵 **Queue** 🎵\n```markdown\n");
@@ -187,7 +187,7 @@ impl EventHandler for Handler {
             name_str.push_str("```");
 
             msg.channel_id.say(&ctx.http, name_str).await.unwrap();
-        } else if message.starts_with("ye skip") || message.starts_with("Ye skip") {
+        } else if message.starts_with("! skip") || message.starts_with("!skip") {
             println!("Got message: {}", message);
             let guild_id = msg.guild_id.unwrap();
             let manager = songbird::get(&ctx)
@@ -198,7 +198,7 @@ impl EventHandler for Handler {
             skip_current_song(guild_id, manager, self.clone())
                 .await
                 .unwrap();
-        } else if message.starts_with("Ye") || message.starts_with("ye") {
+        } else if message.starts_with("!") {
             message = message.split_at(3).1;
             println!("Got message: {}", message);
 
