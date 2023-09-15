@@ -23,11 +23,17 @@ use std::{
     },
     time::Duration,
 };
-use tokio::{process::Command as TokioCommand, sync::Mutex, time::sleep};
+use tokio::{
+    process::Command as TokioCommand,
+    sync::Mutex,
+    time::{sleep, Instant},
+};
 
 lazy_static! {
     #[derive(Debug)]
     static ref VIDEO_QUEUE: Mutex<VecDeque<String>> = Mutex::new(VecDeque::new());
+    #[derive(Debug)]
+    static ref ACTIVE_TIMERS: Arc<Mutex<Vec<Duration>>> = Arc::new(Mutex::new(Vec::new()));
 }
 
 pub struct SongbirdKey;
@@ -101,7 +107,11 @@ impl EventHandler for Handler {
                     let video_title = get_video_title(&url).await.unwrap();
                     let clean_video_title = video_title.replace("\n", "");
                     let new_content = format!("Added to queue: ```{}```", clean_video_title);
-                    msg.channel_id.say(&ctx.http, new_content).await.unwrap();
+                    let created_message = msg
+                        .channel_id
+                        .say(&ctx.http, new_content.clone())
+                        .await
+                        .unwrap();
 
                     {
                         let mut queue = VIDEO_QUEUE.lock().await;
@@ -118,6 +128,7 @@ impl EventHandler for Handler {
                         Some(channel) => {
                             let (_handler_lock, success) = manager.join(guild_id, channel).await;
                             if success.is_ok() {
+                                let duration: Duration = get_video_duration(&url).await.unwrap();
                                 loop {
                                     let should_continue: bool;
                                     {
@@ -132,13 +143,18 @@ impl EventHandler for Handler {
                                                     *playing = true;
                                                     let ctx_clone = ctx.clone();
                                                     let msg_clone = msg.clone();
+                                                    let mut created_message_clone =
+                                                        created_message.clone();
                                                     tokio::spawn(async move {
-                                                        play_youtube(&ctx_clone, msg_clone.clone())
-                                                            .await
-                                                            .unwrap();
+                                                        play_youtube(
+                                                            &ctx_clone,
+                                                            msg_clone.clone(),
+                                                            duration,
+                                                            &mut created_message_clone,
+                                                        )
+                                                        .await
+                                                        .unwrap();
                                                     });
-                                                    let duration: Duration =
-                                                        get_video_duration(&url).await.unwrap();
                                                     tokio::select! {
                                                         _ = sleep(duration) => {
                                                             *playing = false;
@@ -258,6 +274,8 @@ impl EventHandler for Handler {
 async fn play_youtube(
     ctx: &Context,
     msg: Message,
+    duration: Duration,
+    mut created_message: &mut Message,
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let guild = msg.guild(&ctx.cache).unwrap();
     let guild_id = guild.id;
@@ -307,10 +325,84 @@ async fn play_youtube(
             let (track, _track_handle) = songbird::create_player(source);
 
             handler.play_only(track);
+            timer(&ctx, duration, &mut created_message).await;
         }
     }
 
     Ok(())
+}
+
+async fn timer(ctx: &Context, duration: Duration, created_message: &mut Message) {
+    {
+        let mut active_timers = ACTIVE_TIMERS.lock().await;
+        active_timers.push(duration);
+    }
+
+    let active_timers = ACTIVE_TIMERS.clone();
+    let ctx_http_clone = ctx.http.clone();
+    let mut created_message_clone = created_message.clone();
+    let message_content = created_message.content.clone();
+
+    tokio::spawn(async move {
+        let mut first_update = true;
+        while let Some(duration) = {
+            let mut active_timers = active_timers.lock().await;
+            active_timers.pop()
+        } {
+            let mut current_time = 0;
+            let start_time = Instant::now();
+            let mut next_tick = start_time + Duration::from_secs(1);
+            while current_time < duration.as_secs() {
+                let now = Instant::now();
+                if now >= next_tick {
+                    current_time += 1;
+                    let duration_str = format!(
+                        "{}:{:02} / {}:{:02}",
+                        current_time / 60,
+                        current_time % 60,
+                        duration.as_secs() / 60,
+                        duration.as_secs() % 60
+                    );
+
+                    let progress = (current_time as f64 / duration.as_secs() as f64) * 25.0;
+                    let progress_bar: String =
+                        std::iter::repeat("█").take(progress as usize).collect();
+                    let empty_space: String = std::iter::repeat("░")
+                        .take(25 - progress as usize)
+                        .collect();
+
+                    let combined_field =
+                        format!("{}\n{}{}", duration_str, progress_bar, empty_space);
+
+                    created_message_clone
+                        .edit(&ctx_http_clone, |m| {
+                            if first_update {
+                                m.content(" ");
+                                first_update = false;
+                            }
+                            m.embed(|e| {
+                                e.title("Now Playing")
+                                    .description(&message_content.replace("Added to queue:", ""))
+                                    .field("Progress", &combined_field, false)
+                            })
+                        })
+                        .await
+                        .unwrap();
+
+                    next_tick += Duration::from_secs(1);
+                }
+
+                let sleep_time = if next_tick > now {
+                    next_tick - now
+                } else {
+                    Duration::from_millis(1)
+                };
+
+                tokio::time::sleep(sleep_time).await;
+            }
+            created_message_clone.delete(&ctx_http_clone).await.unwrap();
+        }
+    });
 }
 
 async fn skip_current_song(
