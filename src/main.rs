@@ -82,6 +82,12 @@ impl EventHandler for Handler {
             return;
         }
 
+        let guild_id = msg.guild_id.unwrap();
+        let manager = songbird::get(&ctx)
+            .await
+            .expect("Songbird Voice client placed in at initialization.")
+            .clone();
+
         if message.starts_with("! https://") || message.starts_with("!https://") {
             message = message.split_at(1).1;
 
@@ -91,17 +97,17 @@ impl EventHandler for Handler {
                     if let Err(why) = msg.delete(&ctx).await {
                         println!("Error deleting message: {:?}", why);
                     }
-                    
+
                     let video_title = get_video_title(&url).await.unwrap();
                     let clean_video_title = video_title.replace("\n", "");
                     let new_content = format!("Added to queue: ```{}```", clean_video_title);
                     msg.channel_id.say(&ctx.http, new_content).await.unwrap();
-                    
+
                     {
                         let mut queue = VIDEO_QUEUE.lock().await;
                         queue.push_back(url.clone());
                     }
-                    let guild_id = msg.guild_id.unwrap();
+
                     let guild = ctx.cache.guild(guild_id).unwrap();
                     let channel_id = guild
                         .voice_states
@@ -110,11 +116,6 @@ impl EventHandler for Handler {
 
                     match channel_id {
                         Some(channel) => {
-                            let manager = songbird::get(&ctx)
-                                .await
-                                .expect("Songbird Voice client placed in at initialization.")
-                                .clone();
-
                             let (_handler_lock, success) = manager.join(guild_id, channel).await;
                             if success.is_ok() {
                                 loop {
@@ -176,28 +177,63 @@ impl EventHandler for Handler {
             }
         } else if message.starts_with("! q") || message.starts_with("!q") {
             println!("Got message: {}", message);
+            if let Err(why) = msg.delete(&ctx).await {
+                println!("Error deleting message: {:?}", why);
+            }
+            
             let queue = get_video_queue().lock().await;
             let mut name_str = String::from("🎵 **Queue** 🎵\n```markdown\n");
+            let mut tracker = false;
 
             for (index, item) in queue.iter().enumerate() {
+                tracker = true;
                 let title = get_video_title(&item).await.unwrap();
                 let final_title = title.trim();
                 name_str.push_str(&format!("{}: {}\n", index + 1, final_title));
             }
             name_str.push_str("```");
 
-            msg.channel_id.say(&ctx.http, name_str).await.unwrap();
+            if tracker {
+                msg.channel_id.say(&ctx.http, name_str).await.unwrap();
+            } else {
+                msg.channel_id
+                    .say(&ctx.http, "🪹 **Queue Empty** 🪹")
+                    .await
+                    .unwrap();
+            }
         } else if message.starts_with("! skip") || message.starts_with("!skip") {
             println!("Got message: {}", message);
-            let guild_id = msg.guild_id.unwrap();
-            let manager = songbird::get(&ctx)
-                .await
-                .expect("Songbird Voice client placed in at initialization.")
-                .clone();
 
             skip_current_song(guild_id, manager, self.clone())
                 .await
                 .unwrap();
+        } else if message.starts_with("! leave") || message.starts_with("!leave") {
+            println!("Got message: {}", message);
+
+            if manager.get(guild_id).is_some() {
+                manager.remove(guild_id).await.unwrap();
+            }
+            {
+                let mut queue = VIDEO_QUEUE.lock().await;
+                queue.clear();
+            }
+        } else if message.starts_with("! help") || message.starts_with("!help") {
+            println!("Got message: {}", message);
+
+            if let Err(why) = msg.delete(&ctx).await {
+                println!("Error deleting message: {:?}", why);
+            }
+
+            let help_message = "🤖 **Bot Commands** 🤖\n\
+            ```markdown\n\
+            1. !https://<URL>  -- Add a YouTube video to the queue\n\
+            2. !q              -- Display the current audio queue\n\
+            3. !skip           -- Skip the currently playing song\n\
+            4. !leave          -- Leave the voice channel and clear the queue\n\
+            5. !Help           -- Displays this page\n\
+            6. !               -- Everything proceeding from \"!\" is a GPT prompt\n\
+            ```";
+            let _ = msg.channel_id.say(&ctx.http, help_message).await;
         } else if message.starts_with("!") {
             message = message.split_at(2).1;
             println!("Got message: {}", message);
