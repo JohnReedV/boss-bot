@@ -188,6 +188,9 @@ impl EventHandler for Handler {
 
             if manager.get(guild_id).is_some() {
                 manager.remove(guild_id).await.unwrap();
+                skip_current_song(guild_id, manager, self.clone())
+                .await
+                .unwrap();
             }
             {
                 let mut queue = VIDEO_QUEUE.lock().await;
