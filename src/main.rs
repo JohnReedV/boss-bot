@@ -1,22 +1,15 @@
-use lazy_static::lazy_static;
 use openai_rust::{chat::ChatArguments, chat::Message as OpenAiMessage, Client as OpenAiClient};
-use regex::Regex;
 use serenity::{
     async_trait,
     client::{Client, EventHandler},
     framework::StandardFramework,
-    model::{
-        channel::Message,
-        gateway::GatewayIntents,
-        prelude::{ChannelId, GuildId},
-    },
-    prelude::*,
+    model::{channel::Message, gateway::GatewayIntents, prelude::GuildId},
+    prelude::Context,
 };
 use songbird::{input::ffmpeg_optioned, SerenityInit, Songbird};
 use std::{
     collections::VecDeque,
     env,
-    process::Command,
     sync::{
         atomic::{AtomicBool, Ordering},
         Arc,
@@ -25,55 +18,12 @@ use std::{
 };
 use tokio::{
     process::Command as TokioCommand,
-    sync::Mutex,
     time::{sleep, Instant},
 };
-
-lazy_static! {
-    #[derive(Debug)]
-    static ref VIDEO_QUEUE: Mutex<VecDeque<Node>> = Mutex::new(VecDeque::new());
-}
-
-pub struct Node {
-    url: String,
-    duration: Duration,
-}
-
-impl Node {
-    pub fn new() -> Self {
-        Node {
-            url: String::new(),
-            duration: Duration::new(0, 0),
-        }
-    }
-    pub fn from(url: String, duration: Duration) -> Self {
-        Node {
-            url: url,
-            duration: duration,
-        }
-    }
-}
-pub struct SongbirdKey;
-
-impl TypeMapKey for SongbirdKey {
-    type Value = Arc<Songbird>;
-}
-
-struct Handler {
-    pub playing: Arc<Mutex<bool>>,
-    pub skip_player: Arc<AtomicBool>,
-    pub skip_tracker: Arc<AtomicBool>,
-}
-
-impl Default for Handler {
-    fn default() -> Self {
-        Handler {
-            playing: Arc::new(Mutex::new(false)),
-            skip_player: Arc::new(AtomicBool::new(false)),
-            skip_tracker: Arc::new(AtomicBool::new(false)),
-        }
-    }
-}
+pub mod recources;
+use recources::*;
+pub mod utils;
+use utils::*;
 
 #[tokio::main]
 async fn main() {
@@ -439,113 +389,6 @@ async fn chat_gpt(api_key: &str, prompt: &str) -> String {
 
     let res = client.create_chat(args).await.unwrap();
     return format!("{}", res.choices[0].message.content.clone());
-}
-
-async fn send_large_message(
-    ctx: &Context,
-    channel_id: ChannelId,
-    message: &str,
-) -> serenity::Result<()> {
-    let max_length = 1950;
-    let mut start = 0;
-    let mut end = std::cmp::min(max_length, message.len());
-
-    while start < message.len() {
-        let part = &message[start..end];
-        channel_id.say(&ctx.http, part).await?;
-
-        start = end;
-        end = std::cmp::min(end + max_length, message.len());
-    }
-
-    Ok(())
-}
-
-fn extract_youtube_url(input: &str) -> Result<String, Box<dyn std::error::Error + Send>> {
-    let start_index = input.find("https://www.youtube.com/watch?v=");
-    match start_index {
-        Some(start) => {
-            let potential_url = &input[start..];
-            if is_valid_youtube_url(potential_url) {
-                return Ok(potential_url.to_string());
-            }
-            Err(Box::new(std::io::Error::new(
-                std::io::ErrorKind::Other,
-                "No valid YouTube URL found",
-            )))
-        }
-        None => Err(Box::new(std::io::Error::new(
-            std::io::ErrorKind::Other,
-            "No valid YouTube URL found",
-        ))),
-    }
-}
-
-fn is_valid_youtube_url(url: &str) -> bool {
-    let re = Regex::new(r"https?://(www\.)?youtube\.com/watch\?v=[a-zA-Z0-9_-]+").unwrap();
-    return re.is_match(url);
-}
-
-pub fn get_video_queue() -> &'static Mutex<VecDeque<Node>> {
-    &VIDEO_QUEUE
-}
-
-async fn get_video_title(video_url: &String) -> Result<String, std::io::Error> {
-    let output = Command::new("yt-dlp")
-        .arg("--get-title")
-        .arg(video_url)
-        .output()?;
-
-    if output.status.success() {
-        return Ok(String::from_utf8(output.stdout).unwrap());
-    } else {
-        return Err(std::io::Error::new(
-            std::io::ErrorKind::Other,
-            "yt-dlp failed to get video duration",
-        ));
-    }
-}
-
-async fn get_video_duration(video_url: &str) -> std::io::Result<Duration> {
-    let output = Command::new("yt-dlp")
-        .arg("--get-duration")
-        .arg(video_url)
-        .output()?;
-
-    if output.status.success() {
-        let duration_str = String::from_utf8(output.stdout).unwrap();
-        let duration_parts: Vec<&str> = duration_str.trim().split(":").collect();
-        let duration = match duration_parts.len() {
-            3 => {
-                let hrs: u64 = duration_parts[0].parse().unwrap();
-                let mins: u64 = duration_parts[1].parse().unwrap();
-                let secs: u64 = duration_parts[2].parse().unwrap();
-                Duration::from_secs(hrs * 3600 + mins * 60 + secs)
-            }
-            2 => {
-                let mins: u64 = duration_parts[0].parse().unwrap();
-                let secs: u64 = duration_parts[1].parse().unwrap();
-                Duration::from_secs(mins * 60 + secs)
-            }
-            1 => {
-                let secs: u64 = duration_parts[0].parse().unwrap();
-                Duration::from_secs(secs)
-            }
-            _ => {
-                return Err(std::io::Error::new(
-                    std::io::ErrorKind::Other,
-                    "Couldn't parse duration",
-                ))
-            }
-        };
-
-        Ok(duration)
-    } else {
-        return Err(std::io::Error::new(
-            std::io::ErrorKind::Other,
-            "yt-dlp failed to get video duration",
-        ));
-    }
 }
 
 async fn say_queue(
