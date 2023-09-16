@@ -357,6 +357,14 @@ async fn tracker(ctx: Context, skip: Arc<AtomicBool>, msg: Message, node: Node) 
 
             next_tick += Duration::from_secs(1);
         }
+        
+        let sleep_time = if next_tick > now {
+            next_tick - now
+        } else {
+            Duration::from_millis(1)
+        };
+        sleep(sleep_time).await;
+
         if skip.load(Ordering::SeqCst) {
             skip.store(false, Ordering::SeqCst);
             break;
