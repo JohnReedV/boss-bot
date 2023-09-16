@@ -31,15 +31,48 @@ use tokio::{
 
 lazy_static! {
     #[derive(Debug)]
-    static ref VIDEO_QUEUE: Mutex<VecDeque<String>> = Mutex::new(VecDeque::new());
-    #[derive(Debug)]
-    static ref ACTIVE_TIMERS: Arc<Mutex<Vec<Duration>>> = Arc::new(Mutex::new(Vec::new()));
+    static ref VIDEO_QUEUE: Mutex<VecDeque<Node>> = Mutex::new(VecDeque::new());
 }
 
+pub struct Node {
+    url: String,
+    duration: Duration,
+}
+
+impl Node {
+    pub fn new() -> Self {
+        Node {
+            url: String::new(),
+            duration: Duration::new(0, 0),
+        }
+    }
+    pub fn from(url: String, duration: Duration) -> Self {
+        Node {
+            url: url,
+            duration: duration,
+        }
+    }
+}
 pub struct SongbirdKey;
 
 impl TypeMapKey for SongbirdKey {
     type Value = Arc<Songbird>;
+}
+
+struct Handler {
+    pub playing: Arc<Mutex<bool>>,
+    pub skip_player: Arc<AtomicBool>,
+    pub skip_tracker: Arc<AtomicBool>,
+}
+
+impl Default for Handler {
+    fn default() -> Self {
+        Handler {
+            playing: Arc::new(Mutex::new(false)),
+            skip_player: Arc::new(AtomicBool::new(false)),
+            skip_tracker: Arc::new(AtomicBool::new(false)),
+        }
+    }
 }
 
 #[tokio::main]
@@ -67,19 +100,6 @@ async fn main() {
         .map_err(|why| println!("Client ended: {:?}", why));
 }
 
-struct Handler {
-    pub playing: Arc<Mutex<bool>>,
-    pub skip: Arc<AtomicBool>,
-}
-
-impl Default for Handler {
-    fn default() -> Self {
-        Handler {
-            playing: Arc::new(Mutex::new(false)),
-            skip: Arc::new(AtomicBool::new(false)),
-        }
-    }
-}
 #[async_trait]
 impl EventHandler for Handler {
     async fn message(&self, ctx: Context, msg: Message) {
@@ -103,19 +123,11 @@ impl EventHandler for Handler {
                     if let Err(why) = msg.delete(&ctx).await {
                         println!("Error deleting message: {:?}", why);
                     }
-
-                    let video_title = get_video_title(&url).await.unwrap();
-                    let clean_video_title = video_title.replace("\n", "");
-                    let new_content = format!("Added to queue: ```{}```", clean_video_title);
-                    let created_message = msg
-                        .channel_id
-                        .say(&ctx.http, new_content.clone())
-                        .await
-                        .unwrap();
+                    let duration: Duration = get_video_duration(&url).await.unwrap();
 
                     {
                         let mut queue = VIDEO_QUEUE.lock().await;
-                        queue.push_back(url.clone());
+                        queue.push_back(Node::from(url.clone(), duration));
                     }
 
                     let guild = ctx.cache.guild(guild_id).unwrap();
@@ -128,53 +140,69 @@ impl EventHandler for Handler {
                         Some(channel) => {
                             let (_handler_lock, success) = manager.join(guild_id, channel).await;
                             if success.is_ok() {
-                                let duration: Duration = get_video_duration(&url).await.unwrap();
                                 loop {
                                     let should_continue: bool;
+                                    let the_duration: Duration;
                                     {
                                         let queue = VIDEO_QUEUE.lock().await;
                                         should_continue = queue.front().is_some();
+
+                                        the_duration = match queue.front() {
+                                            Some(node) => node.duration,
+                                            None => return,
+                                        }
                                     }
 
                                     if should_continue {
-                                        match self.playing.try_lock() {
-                                            Ok(mut playing) => {
-                                                if !*playing {
+                                        let mut unlock: bool = false;
+                                        {
+                                            let lock = self.playing.try_lock();
+                                            if lock.is_ok() {
+                                                let mut playing = lock.unwrap();
+                                                unlock = !(*playing);
+                                                if unlock {
                                                     *playing = true;
-                                                    let ctx_clone = ctx.clone();
-                                                    let msg_clone = msg.clone();
-                                                    let mut created_message_clone =
-                                                        created_message.clone();
-                                                    tokio::spawn(async move {
-                                                        play_youtube(
-                                                            &ctx_clone,
-                                                            msg_clone.clone(),
-                                                            duration,
-                                                            &mut created_message_clone,
-                                                        )
-                                                        .await
-                                                        .unwrap();
-                                                    });
-                                                    tokio::select! {
-                                                        _ = sleep(duration) => {
-                                                            *playing = false;
+                                                }
+                                            }
+                                        }
+
+                                        if unlock {
+                                            let self_clone = self.skip_tracker.clone();
+                                            let ctx_clone = ctx.clone();
+                                            let msg_clone = msg.clone();
+
+                                            tokio::spawn(async move {
+                                                play_youtube(
+                                                    &ctx_clone,
+                                                    msg_clone.clone(),
+                                                    self_clone,
+                                                )
+                                                .await
+                                                .unwrap();
+                                            });
+
+                                            tokio::select! {
+                                                _ = sleep(the_duration) => {
+                                                    {
+                                                        let mut lock = self.playing.lock().await;
+                                                        *lock = false;
+                                                    }
+                                                }
+                                                _ = async {
+                                                    loop {
+                                                        tokio::time::sleep(Duration::from_millis(100)).await;
+                                                        if self.skip_player.load(Ordering::SeqCst) {
+                                                            self.skip_player.store(false, Ordering::SeqCst);
+                                                            break;
                                                         }
-                                                        _ = async {
-                                                            loop {
-                                                                tokio::time::sleep(Duration::from_millis(100)).await;
-                                                                if self.skip.load(Ordering::SeqCst) {
-                                                                    self.skip.store(false, Ordering::SeqCst);
-                                                                    *playing = false;
-                                                                    break;
-                                                                }
-                                                            }
-                                                        } => {
-                                                            *playing = false;
-                                                        }
+                                                    }
+                                                } => {
+                                                    {
+                                                        let mut lock = self.playing.lock().await;
+                                                        *lock = false;
                                                     }
                                                 }
                                             }
-                                            Err(_) => {}
                                         }
                                     } else {
                                         break;
@@ -198,25 +226,7 @@ impl EventHandler for Handler {
             }
 
             let queue = get_video_queue().lock().await;
-            let mut name_str = String::from("🎵 **Queue** 🎵\n```markdown\n");
-            let mut tracker = false;
-
-            for (index, item) in queue.iter().enumerate() {
-                tracker = true;
-                let title = get_video_title(&item).await.unwrap();
-                let final_title = title.trim();
-                name_str.push_str(&format!("{}: {}\n", index + 1, final_title));
-            }
-            name_str.push_str("```");
-
-            if tracker {
-                msg.channel_id.say(&ctx.http, name_str).await.unwrap();
-            } else {
-                msg.channel_id
-                    .say(&ctx.http, "🪹 **Queue Empty** 🪹")
-                    .await
-                    .unwrap();
-            }
+            say_queue(msg.clone(), &ctx, queue).await;
         } else if message.starts_with("! skip") || message.starts_with("!skip") {
             println!("Got message: {}", message);
 
@@ -274,8 +284,7 @@ impl EventHandler for Handler {
 async fn play_youtube(
     ctx: &Context,
     msg: Message,
-    duration: Duration,
-    mut created_message: &mut Message,
+    skip: Arc<AtomicBool>,
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let guild = msg.guild(&ctx.cache).unwrap();
     let guild_id = guild.id;
@@ -289,12 +298,12 @@ async fn play_youtube(
         let mut handler = handler_lock.lock().await;
 
         let mut queue = VIDEO_QUEUE.lock().await;
-        if let Some(url) = queue.pop_front() {
+        if let Some(node) = queue.pop_front() {
             let output = TokioCommand::new("yt-dlp")
                 .arg("-f")
                 .arg("bestaudio")
                 .arg("-g")
-                .arg(&url)
+                .arg(&node.url)
                 .output()
                 .await?;
 
@@ -325,84 +334,82 @@ async fn play_youtube(
             let (track, _track_handle) = songbird::create_player(source);
 
             handler.play_only(track);
-            timer(&ctx, duration, &mut created_message).await;
+
+            let ctx_clone = ctx.clone();
+            tokio::spawn(async move {
+                tracker(ctx_clone, skip, msg, node).await;
+            });
         }
     }
 
     Ok(())
 }
 
-async fn timer(ctx: &Context, duration: Duration, created_message: &mut Message) {
-    {
-        let mut active_timers = ACTIVE_TIMERS.lock().await;
-        active_timers.push(duration);
-    }
+async fn tracker(ctx: Context, skip: Arc<AtomicBool>, msg: Message, node: Node) {
+    let mut first_update = true;
+    let mut current_time = 0;
+    let start_time = Instant::now();
+    let mut next_tick = start_time + Duration::from_secs(1);
 
-    let active_timers = ACTIVE_TIMERS.clone();
-    let ctx_http_clone = ctx.http.clone();
-    let mut created_message_clone = created_message.clone();
-    let message_content = created_message.content.clone();
+    let url = node.url;
+    let duration = node.duration;
 
-    tokio::spawn(async move {
-        let mut first_update = true;
-        while let Some(duration) = {
-            let mut active_timers = active_timers.lock().await;
-            active_timers.pop()
-        } {
-            let mut current_time = 0;
-            let start_time = Instant::now();
-            let mut next_tick = start_time + Duration::from_secs(1);
-            while current_time < duration.as_secs() {
-                let now = Instant::now();
-                if now >= next_tick {
-                    current_time += 1;
-                    let duration_str = format!(
-                        "{}:{:02} / {}:{:02}",
-                        current_time / 60,
-                        current_time % 60,
-                        duration.as_secs() / 60,
-                        duration.as_secs() % 60
-                    );
+    let video_title = get_video_title(&url).await.unwrap();
+    let clean_video_title = video_title.replace("\n", "");
+    let new_content = format!("Playing: ```{}```", clean_video_title);
+    let mut created_message = msg
+        .channel_id
+        .say(&ctx.http, new_content.clone())
+        .await
+        .unwrap();
 
-                    let progress = (current_time as f64 / duration.as_secs() as f64) * 25.0;
-                    let progress_bar: String =
-                        std::iter::repeat("█").take(progress as usize).collect();
-                    let empty_space: String = std::iter::repeat("░")
-                        .take(25 - progress as usize)
-                        .collect();
+    let content = created_message.content.replace("Playing:", "");
 
-                    let combined_field =
-                        format!("{}\n{}{}", duration_str, progress_bar, empty_space);
+    while current_time < duration.as_secs() {
+        let now = Instant::now();
+        if now >= next_tick {
+            current_time += 1;
+            let duration_str = format!(
+                "{}:{:02} / {}:{:02}",
+                current_time / 60,
+                current_time % 60,
+                duration.as_secs() / 60,
+                duration.as_secs() % 60
+            );
 
-                    created_message_clone
-                        .edit(&ctx_http_clone, |m| {
-                            if first_update {
-                                m.content(" ");
-                                first_update = false;
-                            }
-                            m.embed(|e| {
-                                e.title("Now Playing")
-                                    .description(&message_content.replace("Added to queue:", ""))
-                                    .field("Progress", &combined_field, false)
-                            })
-                        })
-                        .await
-                        .unwrap();
+            let progress = (current_time as f64 / duration.as_secs() as f64) * 25.0;
+            let progress_bar: String = std::iter::repeat("█").take(progress as usize).collect();
+            let empty_space: String = std::iter::repeat("░")
+                .take(25 - progress as usize)
+                .collect();
 
-                    next_tick += Duration::from_secs(1);
-                }
+            let combined_field = format!("{}\n{}{}", duration_str, progress_bar, empty_space);
 
-                let sleep_time = if next_tick > now {
-                    next_tick - now
-                } else {
-                    Duration::from_millis(1)
-                };
+            created_message
+                .edit(&ctx.http, |m| {
+                    if first_update {
+                        m.content(" ");
+                        first_update = false;
+                    }
+                    m.embed(|e| {
+                        e.title("Now Playing").description(&content).field(
+                            "Progress",
+                            &combined_field,
+                            false,
+                        )
+                    })
+                })
+                .await
+                .unwrap();
 
-                tokio::time::sleep(sleep_time).await;
-            }
-            created_message_clone.delete(&ctx_http_clone).await.unwrap();
+            next_tick += Duration::from_secs(1);
         }
-    });
+        if skip.load(Ordering::SeqCst) {
+            skip.store(false, Ordering::SeqCst);
+            break;
+        }
+    }
+    created_message.delete(&ctx.http).await.unwrap();
 }
 
 async fn skip_current_song(
@@ -415,7 +422,8 @@ async fn skip_current_song(
         handler.stop();
     }
 
-    app.skip.store(true, Ordering::SeqCst);
+    app.skip_player.store(true, Ordering::SeqCst);
+    app.skip_tracker.store(true, Ordering::SeqCst);
     Ok(())
 }
 
@@ -478,7 +486,7 @@ fn is_valid_youtube_url(url: &str) -> bool {
     return re.is_match(url);
 }
 
-pub fn get_video_queue() -> &'static Mutex<VecDeque<String>> {
+pub fn get_video_queue() -> &'static Mutex<VecDeque<Node>> {
     &VIDEO_QUEUE
 }
 
@@ -537,5 +545,31 @@ async fn get_video_duration(video_url: &str) -> std::io::Result<Duration> {
             std::io::ErrorKind::Other,
             "yt-dlp failed to get video duration",
         ));
+    }
+}
+
+async fn say_queue(
+    msg: Message,
+    ctx: &Context,
+    queue: tokio::sync::MutexGuard<'_, VecDeque<Node>>,
+) {
+    let mut name_str = String::from("🎵 **Queue** 🎵\n```markdown\n");
+    let mut tracker = false;
+
+    for (index, item) in queue.iter().enumerate() {
+        tracker = true;
+        let title = get_video_title(&item.url).await.unwrap();
+        let final_title = title.trim();
+        name_str.push_str(&format!("{}: {}\n", index + 1, final_title));
+    }
+    name_str.push_str("```");
+
+    if tracker {
+        msg.channel_id.say(&ctx.http, name_str).await.unwrap();
+    } else {
+        msg.channel_id
+            .say(&ctx.http, "🪹 **Queue Empty** 🪹")
+            .await
+            .unwrap();
     }
 }
