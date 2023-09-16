@@ -20,8 +20,8 @@ use tokio::{
     process::Command as TokioCommand,
     time::{sleep, Instant},
 };
-pub mod recources;
-use recources::*;
+pub mod resources;
+use resources::*;
 pub mod utils;
 use utils::*;
 
