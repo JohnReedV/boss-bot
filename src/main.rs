@@ -135,13 +135,15 @@ impl EventHandler for Handler {
                                             });
 
                                             tokio::select! {
-                                                _ = sleep(the_duration) => {
+                                                _ = sleep(the_duration + Duration::from_secs(1)) => {
                                                     {
+
                                                         let mut playing_lock = self.playing.lock().await;
                                                         *playing_lock = false;
 
-                                                        let mut tracking_lock = self.tracking.lock().await;
-                                                        *tracking_lock = false;
+                                                        if *self.tracking.lock().await {
+                                                            self.skip_tracker.store(true, Ordering::SeqCst);
+                                                        }
                                                     }
                                                 }
                                                 _ = async {
@@ -156,9 +158,6 @@ impl EventHandler for Handler {
                                                     {
                                                         let mut playing_lock = self.playing.lock().await;
                                                         *playing_lock = false;
-
-                                                        let mut tracking_lock = self.tracking.lock().await;
-                                                        *tracking_lock = false;
                                                     }
                                                 }
                                             }
@@ -324,12 +323,12 @@ async fn tracker(
                 unlock = !*tracking;
                 if unlock {
                     *tracking = true;
+                    break;
                 }
             }
         }
     }
 
-    println!("Entering");
     let mut first_update = true;
     let mut current_time = 0;
     let start_time = Instant::now();
@@ -392,12 +391,6 @@ async fn tracker(
         if skip.load(Ordering::SeqCst) {
             skip.store(false, Ordering::SeqCst);
             break;
-        }
-        {
-            let tracking = tracking_mutex.lock().await;
-            if *tracking == false {
-                break;
-            }
         }
     }
     created_message.delete(&ctx.http).await.unwrap();
