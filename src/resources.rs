@@ -41,6 +41,7 @@ impl TypeMapKey for SongbirdKey {
 
 pub struct Handler {
     pub playing: Arc<Mutex<bool>>,
+    pub tracking: Arc<Mutex<bool>>,
     pub skip_player: Arc<AtomicBool>,
     pub skip_tracker: Arc<AtomicBool>,
 }
@@ -49,6 +50,7 @@ impl Default for Handler {
     fn default() -> Self {
         Handler {
             playing: Arc::new(Mutex::new(false)),
+            tracking: Arc::new(Mutex::new(false)),
             skip_player: Arc::new(AtomicBool::new(false)),
             skip_tracker: Arc::new(AtomicBool::new(false)),
         }

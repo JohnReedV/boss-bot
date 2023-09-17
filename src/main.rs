@@ -44,10 +44,11 @@ async fn main() {
         data.insert::<SongbirdKey>(songbird.clone());
     }
 
-    let _ = client
+    client
         .start()
         .await
-        .map_err(|why| println!("Client ended: {:?}", why));
+        .map_err(|why| println!("Client ended: {:?}", why))
+        .unwrap();
 }
 
 #[async_trait]
@@ -109,7 +110,7 @@ impl EventHandler for Handler {
                                             let lock = self.playing.try_lock();
                                             if lock.is_ok() {
                                                 let mut playing = lock.unwrap();
-                                                unlock = !(*playing);
+                                                unlock = !*playing;
                                                 if unlock {
                                                     *playing = true;
                                                 }
@@ -117,7 +118,8 @@ impl EventHandler for Handler {
                                         }
 
                                         if unlock {
-                                            let self_clone = self.skip_tracker.clone();
+                                            let tracker_clone = self.tracking.clone();
+                                            let skip_tracker_clone = self.skip_tracker.clone();
                                             let ctx_clone = ctx.clone();
                                             let msg_clone = msg.clone();
 
@@ -125,7 +127,8 @@ impl EventHandler for Handler {
                                                 play_youtube(
                                                     &ctx_clone,
                                                     msg_clone.clone(),
-                                                    self_clone,
+                                                    skip_tracker_clone,
+                                                    tracker_clone,
                                                 )
                                                 .await
                                                 .unwrap();
@@ -134,8 +137,11 @@ impl EventHandler for Handler {
                                             tokio::select! {
                                                 _ = sleep(the_duration) => {
                                                     {
-                                                        let mut lock = self.playing.lock().await;
-                                                        *lock = false;
+                                                        let mut playing_lock = self.playing.lock().await;
+                                                        *playing_lock = false;
+
+                                                        let mut tracking_lock = self.tracking.lock().await;
+                                                        *tracking_lock = false;
                                                     }
                                                 }
                                                 _ = async {
@@ -148,8 +154,11 @@ impl EventHandler for Handler {
                                                     }
                                                 } => {
                                                     {
-                                                        let mut lock = self.playing.lock().await;
-                                                        *lock = false;
+                                                        let mut playing_lock = self.playing.lock().await;
+                                                        *playing_lock = false;
+
+                                                        let mut tracking_lock = self.tracking.lock().await;
+                                                        *tracking_lock = false;
                                                     }
                                                 }
                                             }
@@ -161,12 +170,12 @@ impl EventHandler for Handler {
                             }
                         }
                         None => {
-                            let _ = msg.reply(&ctx, "Join voice noob").await;
+                            msg.reply(&ctx, "Join voice noob").await.unwrap();
                         }
                     }
                 }
                 Err(_) => {
-                    let _ = msg.reply(&ctx, "Bad URL").await;
+                    msg.reply(&ctx, "Bad URL").await.unwrap();
                 }
             }
         } else if message.starts_with("! q") || message.starts_with("!q") {
@@ -189,8 +198,8 @@ impl EventHandler for Handler {
             if manager.get(guild_id).is_some() {
                 manager.remove(guild_id).await.unwrap();
                 skip_current_song(guild_id, manager, self.clone())
-                .await
-                .unwrap();
+                    .await
+                    .unwrap();
             }
             {
                 let mut queue = VIDEO_QUEUE.lock().await;
@@ -212,7 +221,7 @@ impl EventHandler for Handler {
             5. !help           -- Displays this page\n\
             6. !               -- Everything proceeding from \"!\" is a GPT prompt\n\
             ```";
-            let _ = msg.channel_id.say(&ctx.http, help_message).await;
+            msg.channel_id.say(&ctx.http, help_message).await.unwrap();
         } else if message.starts_with("!") {
             message = message.split_at(2).1;
             println!("Got message: {}", message);
@@ -227,7 +236,7 @@ impl EventHandler for Handler {
             .await
             .unwrap();
 
-            let _ = send_large_message(&ctx, msg.channel_id, &response)
+            send_large_message(&ctx, msg.channel_id, &response)
                 .await
                 .expect("Expected to send_large_message");
         }
@@ -238,6 +247,7 @@ async fn play_youtube(
     ctx: &Context,
     msg: Message,
     skip: Arc<AtomicBool>,
+    tracking_mutex: Arc<tokio::sync::Mutex<bool>>,
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let guild = msg.guild(&ctx.cache).unwrap();
     let guild_id = guild.id;
@@ -290,7 +300,7 @@ async fn play_youtube(
 
             let ctx_clone = ctx.clone();
             tokio::spawn(async move {
-                tracker(ctx_clone, skip, msg, node).await;
+                tracker(ctx_clone, skip, tracking_mutex, msg, node).await;
             });
         }
     }
@@ -298,7 +308,28 @@ async fn play_youtube(
     Ok(())
 }
 
-async fn tracker(ctx: Context, skip: Arc<AtomicBool>, msg: Message, node: Node) {
+async fn tracker(
+    ctx: Context,
+    skip: Arc<AtomicBool>,
+    tracking_mutex: Arc<tokio::sync::Mutex<bool>>,
+    msg: Message,
+    node: Node,
+) {
+    let mut unlock: bool = false;
+    while !unlock {
+        {
+            let lock = tracking_mutex.try_lock();
+            if lock.is_ok() {
+                let mut tracking = lock.unwrap();
+                unlock = !*tracking;
+                if unlock {
+                    *tracking = true;
+                }
+            }
+        }
+    }
+
+    println!("Entering");
     let mut first_update = true;
     let mut current_time = 0;
     let start_time = Instant::now();
@@ -357,20 +388,23 @@ async fn tracker(ctx: Context, skip: Arc<AtomicBool>, msg: Message, node: Node) 
 
             next_tick += Duration::from_secs(1);
         }
-        
-        let sleep_time = if next_tick > now {
-            next_tick - now
-        } else {
-            Duration::from_millis(1)
-        };
-        sleep(sleep_time).await;
 
         if skip.load(Ordering::SeqCst) {
             skip.store(false, Ordering::SeqCst);
             break;
         }
+        {
+            let tracking = tracking_mutex.lock().await;
+            if *tracking == false {
+                break;
+            }
+        }
     }
     created_message.delete(&ctx.http).await.unwrap();
+    {
+        let mut tracking = tracking_mutex.lock().await;
+        *tracking = false;
+    }
 }
 
 async fn skip_current_song(
