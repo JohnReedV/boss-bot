@@ -314,19 +314,9 @@ async fn tracker(
     msg: Message,
     node: Node,
 ) {
-    let mut unlock: bool = false;
-    while !unlock {
-        {
-            let lock = tracking_mutex.try_lock();
-            if lock.is_ok() {
-                let mut tracking = lock.unwrap();
-                unlock = !*tracking;
-                if unlock {
-                    *tracking = true;
-                    break;
-                }
-            }
-        }
+    {
+        let mut tracking = tracking_mutex.lock().await;
+        *tracking = true;
     }
 
     let mut first_update = true;
