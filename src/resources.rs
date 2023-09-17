@@ -14,6 +14,16 @@ lazy_static! {
     pub static ref VIDEO_QUEUE: Mutex<VecDeque<Node>> = Mutex::new(VecDeque::new());
 }
 
+pub const HELP_MESSAGE: &str = "💅🏻 **Woman Commands** ☕\n\
+```markdown\n\
+1. !https://<URL>  -- Add a YouTube video to the queue\n\
+2. !q              -- Display the current audio queue\n\
+3. !skip           -- Skip the currently playing song\n\
+4. !leave          -- Leave the voice channel and clear the queue\n\
+5. !help           -- Displays this page\n\
+6. !               -- Everything proceeding from \"!\" is a GPT prompt\n\
+```";
+
 pub struct Node {
     pub url: String,
     pub duration: Duration,

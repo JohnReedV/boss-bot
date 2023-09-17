@@ -67,116 +67,9 @@ impl EventHandler for Handler {
 
         if message.starts_with("! https://") || message.starts_with("!https://") {
             message = message.split_at(1).1;
-
             println!("Got yt message: {}", message);
-            match extract_youtube_url(message) {
-                Ok(url) => {
-                    if let Err(why) = msg.delete(&ctx).await {
-                        println!("Error deleting message: {:?}", why);
-                    }
-                    let duration: Duration = get_video_duration(&url).await.unwrap();
 
-                    {
-                        let mut queue = VIDEO_QUEUE.lock().await;
-                        queue.push_back(Node::from(url.clone(), duration));
-                    }
-
-                    let guild = ctx.cache.guild(guild_id).unwrap();
-                    let channel_id = guild
-                        .voice_states
-                        .get(&msg.author.id)
-                        .and_then(|voice_state| voice_state.channel_id);
-
-                    match channel_id {
-                        Some(channel) => {
-                            let (_handler_lock, success) = manager.join(guild_id, channel).await;
-                            if success.is_ok() {
-                                loop {
-                                    let should_continue: bool;
-                                    let the_duration: Duration;
-                                    {
-                                        let queue = VIDEO_QUEUE.lock().await;
-                                        should_continue = queue.front().is_some();
-
-                                        the_duration = match queue.front() {
-                                            Some(node) => node.duration,
-                                            None => return,
-                                        }
-                                    }
-
-                                    if should_continue {
-                                        let mut unlock: bool = false;
-                                        {
-                                            let lock = self.playing.try_lock();
-                                            if lock.is_ok() {
-                                                let mut playing = lock.unwrap();
-                                                unlock = !*playing;
-                                                if unlock {
-                                                    *playing = true;
-                                                }
-                                            }
-                                        }
-
-                                        if unlock {
-                                            let tracker_clone = self.tracking.clone();
-                                            let skip_tracker_clone = self.skip_tracker.clone();
-                                            let ctx_clone = ctx.clone();
-                                            let msg_clone = msg.clone();
-
-                                            tokio::spawn(async move {
-                                                play_youtube(
-                                                    &ctx_clone,
-                                                    msg_clone.clone(),
-                                                    skip_tracker_clone,
-                                                    tracker_clone,
-                                                )
-                                                .await
-                                                .unwrap();
-                                            });
-
-                                            tokio::select! {
-                                                _ = sleep(the_duration + Duration::from_secs(1)) => {
-                                                    {
-
-                                                        let mut playing_lock = self.playing.lock().await;
-                                                        *playing_lock = false;
-
-                                                        if *self.tracking.lock().await {
-                                                            self.skip_tracker.store(true, Ordering::SeqCst);
-                                                        }
-                                                    }
-                                                }
-                                                _ = async {
-                                                    loop {
-                                                        tokio::time::sleep(Duration::from_millis(100)).await;
-                                                        if self.skip_player.load(Ordering::SeqCst) {
-                                                            self.skip_player.store(false, Ordering::SeqCst);
-                                                            break;
-                                                        }
-                                                    }
-                                                } => {
-                                                    {
-                                                        let mut playing_lock = self.playing.lock().await;
-                                                        *playing_lock = false;
-                                                    }
-                                                }
-                                            }
-                                        }
-                                    } else {
-                                        break;
-                                    }
-                                }
-                            }
-                        }
-                        None => {
-                            msg.reply(&ctx, "Join voice noob").await.unwrap();
-                        }
-                    }
-                }
-                Err(_) => {
-                    msg.reply(&ctx, "Bad URL").await.unwrap();
-                }
-            }
+            manage_queue(message, msg.clone(), guild_id, &ctx, manager, self.clone()).await;
         } else if message.starts_with("! q") || message.starts_with("!q") {
             println!("Got message: {}", message);
             if let Err(why) = msg.delete(&ctx).await {
@@ -211,16 +104,7 @@ impl EventHandler for Handler {
                 println!("Error deleting message: {:?}", why);
             }
 
-            let help_message = "💅🏻 **Woman Commands** ☕\n\
-            ```markdown\n\
-            1. !https://<URL>  -- Add a YouTube video to the queue\n\
-            2. !q              -- Display the current audio queue\n\
-            3. !skip           -- Skip the currently playing song\n\
-            4. !leave          -- Leave the voice channel and clear the queue\n\
-            5. !help           -- Displays this page\n\
-            6. !               -- Everything proceeding from \"!\" is a GPT prompt\n\
-            ```";
-            msg.channel_id.say(&ctx.http, help_message).await.unwrap();
+            msg.channel_id.say(&ctx.http, HELP_MESSAGE).await.unwrap();
         } else if message.starts_with("!") {
             message = message.split_at(2).1;
             println!("Got message: {}", message);
@@ -238,6 +122,124 @@ impl EventHandler for Handler {
             send_large_message(&ctx, msg.channel_id, &response)
                 .await
                 .expect("Expected to send_large_message");
+        }
+    }
+}
+
+async fn manage_queue(
+    message: &str,
+    msg: Message,
+    guild_id: GuildId,
+    ctx: &Context,
+    manager: Arc<Songbird>,
+    app: &Handler,
+) {
+    match extract_youtube_url(message) {
+        Ok(url) => {
+            if let Err(why) = msg.delete(&ctx).await {
+                println!("Error deleting message: {:?}", why);
+            }
+            let duration: Duration = get_video_duration(&url).await.unwrap();
+
+            {
+                let mut queue = VIDEO_QUEUE.lock().await;
+                queue.push_back(Node::from(url.clone(), duration));
+            }
+
+            let guild = ctx.cache.guild(guild_id).unwrap();
+            let channel_id = guild
+                .voice_states
+                .get(&msg.author.id)
+                .and_then(|voice_state| voice_state.channel_id);
+
+            match channel_id {
+                Some(channel) => {
+                    let (_handler_lock, success) = manager.join(guild_id, channel).await;
+                    if success.is_ok() {
+                        loop {
+                            let should_continue: bool;
+                            let the_duration: Duration;
+                            {
+                                let queue = VIDEO_QUEUE.lock().await;
+                                should_continue = queue.front().is_some();
+
+                                the_duration = match queue.front() {
+                                    Some(node) => node.duration,
+                                    None => return,
+                                }
+                            }
+
+                            if should_continue {
+                                let mut unlock: bool = false;
+                                {
+                                    let lock = app.playing.try_lock();
+                                    if lock.is_ok() {
+                                        let mut playing = lock.unwrap();
+                                        unlock = !*playing;
+                                        if unlock {
+                                            *playing = true;
+                                        }
+                                    }
+                                }
+
+                                if unlock {
+                                    let tracker_clone = app.tracking.clone();
+                                    let skip_tracker_clone = app.skip_tracker.clone();
+                                    let ctx_clone = ctx.clone();
+                                    let msg_clone = msg.clone();
+
+                                    tokio::spawn(async move {
+                                        play_youtube(
+                                            &ctx_clone,
+                                            msg_clone.clone(),
+                                            skip_tracker_clone,
+                                            tracker_clone,
+                                        )
+                                        .await
+                                        .unwrap();
+                                    });
+
+                                    tokio::select! {
+                                        _ = sleep(the_duration + Duration::from_secs(1)) => {
+                                            {
+
+                                                let mut playing_lock = app.playing.lock().await;
+                                                *playing_lock = false;
+
+                                                if *app.tracking.lock().await {
+                                                    app.skip_tracker.store(true, Ordering::SeqCst);
+                                                }
+                                            }
+                                        }
+                                        _ = async {
+                                            loop {
+                                                tokio::time::sleep(Duration::from_millis(100)).await;
+                                                if app.skip_player.load(Ordering::SeqCst) {
+                                                    app.skip_player.store(false, Ordering::SeqCst);
+                                                    break;
+                                                }
+                                            }
+                                        } => {
+                                            {
+                                                let mut playing_lock = app.playing.lock().await;
+                                                *playing_lock = false;
+                                            }
+                                        }
+                                    }
+                                }
+                            } else {
+                                break;
+                            }
+                        }
+                    }
+                }
+                None => {
+                    msg.reply(&ctx, "Join voice noob").await.unwrap();
+                }
+            }
+        }
+        Err(_) => {
+            msg.reply(&ctx, "Bad URL").await.unwrap();
         }
     }
 }
