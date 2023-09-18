@@ -7,6 +7,8 @@ use std::{
 };
 use tokio::sync::Mutex;
 use crate::{Node, VIDEO_QUEUE};
+use crate::Handler;
+use std::sync::atomic::Ordering;
 
 pub fn extract_youtube_url(input: &str) -> Result<&str, Box<dyn std::error::Error + Send>> {
     let start_index = input.find("https://www.youtube.com/watch?v=");
@@ -113,4 +115,29 @@ pub async fn send_large_message(
     }
 
     Ok(())
+}
+
+pub async fn skip_all_enabled(app: &Handler) {
+    {
+        let mut queue = VIDEO_QUEUE.lock().await;
+        queue.clear();
+    }
+    {
+        let playing_lock = app.playing.lock().await;
+        if *playing_lock {
+            app.skip_player.store(true, Ordering::SeqCst);
+        }
+    }
+    {
+        let tracking_lock = app.tracking.lock().await;
+        if *tracking_lock {
+            app.skip_tracker.store(true, Ordering::SeqCst);
+        }
+    }
+    {
+        let looping_lock = app.looping.lock().await;
+        if *looping_lock {
+            app.skip_loop.store(true, Ordering::SeqCst);
+        }
+    }
 }

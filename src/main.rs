@@ -523,31 +523,6 @@ async fn skip_current_song(
     Ok(())
 }
 
-async fn skip_all_enabled(app: &Handler) {
-    {
-        let mut queue = VIDEO_QUEUE.lock().await;
-        queue.clear();
-    }
-    {
-        let playing_lock = app.playing.lock().await;
-        if *playing_lock {
-            app.skip_player.store(true, Ordering::SeqCst);
-        }
-    }
-    {
-        let tracking_lock = app.tracking.lock().await;
-        if *tracking_lock {
-            app.skip_tracker.store(true, Ordering::SeqCst);
-        }
-    }
-    {
-        let looping_lock = app.looping.lock().await;
-        if *looping_lock {
-            app.skip_loop.store(true, Ordering::SeqCst);
-        }
-    }
-}
-
 async fn chat_gpt(api_key: &str, prompt: &str) -> String {
     let client: OpenAiClient = OpenAiClient::new(api_key);
     let args: ChatArguments = ChatArguments::new(
