@@ -21,6 +21,7 @@ Want to know what's coming up next? Type `!q` to see the current queue of songs.
 - **Play Music**: `!https://www.youtube.com/watch?v=example`
 - **Show Queue**: `!q`
 - **Skip Song**: `!skip`
+- **Loop Song**: `!loop <count> <url>`
 - **Leave Channel**: `!leave`
 - **Chat with AI**: `! [Your message here]`
 
