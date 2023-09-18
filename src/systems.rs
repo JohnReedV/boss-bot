@@ -8,6 +8,7 @@ use serenity::{
 };
 use songbird::{input::ffmpeg_optioned, Songbird};
 use std::{
+    cmp::max,
     collections::VecDeque,
     sync::{
         atomic::{AtomicBool, Ordering},
@@ -112,10 +113,10 @@ pub async fn manage_queue(
                                     tokio::select! {
                                         _ = sleep(the_duration + Duration::from_secs(1)) => {
                                             {
-
                                                 let mut playing_lock = app.playing.lock().await;
                                                 *playing_lock = false;
-
+                                            }
+                                            {
                                                 if *app.tracking.lock().await {
                                                     app.skip_tracker.store(true, Ordering::SeqCst);
                                                 }
@@ -133,6 +134,11 @@ pub async fn manage_queue(
                                             {
                                                 let mut playing_lock = app.playing.lock().await;
                                                 *playing_lock = false;
+                                            }
+                                            {
+                                                if *app.tracking.lock().await {
+                                                    app.skip_tracker.store(true, Ordering::SeqCst);
+                                                }
                                             }
                                         }
                                     }
@@ -209,13 +215,14 @@ pub async fn tracker(
         *tracking = true;
     }
 
+    let url = node.url;
+    let duration = node.duration;
+    let count = max(1, duration.as_secs() / NUMBER_OF_PROGRESS_BARS);
+
     let mut first_update = true;
     let mut current_time = 0;
     let start_time = Instant::now();
-    let mut next_tick = start_time + Duration::from_secs(1);
-
-    let url = node.url;
-    let duration = node.duration;
+    let mut next_tick = start_time + Duration::from_secs(count);
 
     let video_title = get_video_title(&url).await.unwrap();
     let clean_video_title = video_title.replace("\n", "");
@@ -231,7 +238,7 @@ pub async fn tracker(
     while current_time < duration.as_secs() {
         let now = Instant::now();
         if now >= next_tick {
-            current_time += 1;
+            current_time += count;
             let duration_str = format!(
                 "{}:{:02} / {}:{:02}",
                 current_time / 60,
@@ -240,10 +247,12 @@ pub async fn tracker(
                 duration.as_secs() % 60
             );
 
-            let progress = (current_time as f64 / duration.as_secs() as f64) * 25.0;
-            let progress_bar: String = std::iter::repeat("█").take(progress as usize).collect();
+            let progress: usize = ((current_time as f64 / duration.as_secs() as f64)
+                * NUMBER_OF_PROGRESS_BARS as f64)
+                .floor() as usize;
+            let progress_bar: String = std::iter::repeat("█").take(progress).collect();
             let empty_space: String = std::iter::repeat("░")
-                .take(25 - progress as usize)
+                .take(49 - progress as usize)
                 .collect();
 
             let combined_field = format!("{}\n{}{}", duration_str, progress_bar, empty_space);
@@ -265,13 +274,14 @@ pub async fn tracker(
                 .await
                 .unwrap();
 
-            next_tick += Duration::from_secs(1);
+            next_tick += Duration::from_secs(count);
         }
 
         if skip.load(Ordering::SeqCst) {
             skip.store(false, Ordering::SeqCst);
             break;
         }
+        sleep(Duration::from_secs(count)).await;
     }
     {
         let mut tracking = tracking_mutex.lock().await;

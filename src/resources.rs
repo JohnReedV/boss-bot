@@ -15,6 +15,8 @@ lazy_static! {
     pub static ref RE: Regex = Regex::new(r"-?\d+").unwrap();
 }
 
+pub const NUMBER_OF_PROGRESS_BARS: u64 = 49;
+
 pub const HELP_MESSAGE: &str = "💅🏻 **Woman Commands** ☕\n\
 ```markdown\n\
 1. !https://<URL>  -- Add a YouTube video to the queue\n\
