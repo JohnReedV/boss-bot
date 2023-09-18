@@ -1,4 +1,5 @@
 use openai_rust::{chat::ChatArguments, chat::Message as OpenAiMessage, Client as OpenAiClient};
+use regex::Regex;
 use serenity::{
     async_trait,
     client::{Client, EventHandler},
@@ -58,6 +59,7 @@ impl EventHandler for Handler {
         if msg.author.bot {
             return;
         }
+        println!("Got message: {}", message);
 
         let guild_id = msg.guild_id.unwrap();
         let manager = songbird::get(&ctx)
@@ -67,26 +69,18 @@ impl EventHandler for Handler {
 
         if message.starts_with("! https://") || message.starts_with("!https://") {
             message = message.split_at(1).1;
-            println!("Got yt message: {}", message);
 
             manage_queue(message, msg.clone(), guild_id, &ctx, manager, self.clone()).await;
         } else if message.starts_with("! q") || message.starts_with("!q") {
-            println!("Got message: {}", message);
-            if let Err(why) = msg.delete(&ctx).await {
-                println!("Error deleting message: {:?}", why);
-            }
-
+            msg.delete(&ctx).await.unwrap();
             let queue = get_video_queue().lock().await;
+
             say_queue(msg.clone(), &ctx, queue).await;
         } else if message.starts_with("! skip") || message.starts_with("!skip") {
-            println!("Got message: {}", message);
-
             skip_current_song(guild_id, manager, self.clone())
                 .await
                 .unwrap();
         } else if message.starts_with("! leave") || message.starts_with("!leave") {
-            println!("Got message: {}", message);
-
             if manager.get(guild_id).is_some() {
                 manager.remove(guild_id).await.unwrap();
                 skip_current_song(guild_id, manager, self.clone())
@@ -98,16 +92,15 @@ impl EventHandler for Handler {
                 queue.clear();
             }
         } else if message.starts_with("! help") || message.starts_with("!help") {
-            println!("Got message: {}", message);
-
-            if let Err(why) = msg.delete(&ctx).await {
-                println!("Error deleting message: {:?}", why);
-            }
-
+            msg.delete(&ctx).await.unwrap();
             msg.channel_id.say(&ctx.http, HELP_MESSAGE).await.unwrap();
+        } else if message.starts_with("! loop ") || message.starts_with("!loop ") {
+            msg.delete(&ctx).await.unwrap();
+            loop_song(self.clone(), message, msg.clone(), &ctx)
+                .await
+                .unwrap();
         } else if message.starts_with("!") {
             message = message.split_at(2).1;
-            println!("Got message: {}", message);
 
             let api_key: String = env::var("OPENAI_KEY").expect("Expected OPENAI_KEY to be set");
             let prompt: String = message.to_string();
@@ -126,6 +119,134 @@ impl EventHandler for Handler {
     }
 }
 
+async fn loop_song(
+    app: &Handler,
+    full_message: &str,
+    msg: Message,
+    ctx: &Context,
+) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    match extract_youtube_url(full_message) {
+        Ok(url) => {
+            let message: String = full_message.replace(url, "");
+
+            if let Some(cap) = RE.captures_iter(&message).next() {
+                skip_all_enabled(app).await;
+
+                let loop_count_message = &cap[0];
+                let count = match loop_count_message.parse::<usize>() {
+                    Ok(i) => i,
+                    Err(_) => usize::MAX,
+                };
+
+                let guild = msg.guild(&ctx.cache).unwrap();
+                let guild_id = guild.id;
+
+                let channel_id = guild
+                    .voice_states
+                    .get(&msg.author.id)
+                    .and_then(|voice_state| voice_state.channel_id)
+                    .unwrap();
+
+                let manager = songbird::get(ctx)
+                    .await
+                    .expect("Songbird Voice client placed in at initialization.")
+                    .clone();
+                let (_handler_lock, _success) = manager.join(guild_id, channel_id).await;
+
+                if let Some(handler_lock) = manager.get(guild_id) {
+                    let duration = get_video_duration(url).await.unwrap();
+                    msg.channel_id
+                        .say(
+                            &ctx.http,
+                            format!("looping {} times for my king {}", count, msg.author.clone()),
+                        )
+                        .await
+                        .unwrap();
+
+                    {
+                        let mut looping_lock = app.looping.lock().await;
+                        *looping_lock = true;
+                    }
+
+                    let mut iterations = 0;
+                    loop {
+                        let output = TokioCommand::new("yt-dlp")
+                            .arg("-f")
+                            .arg("bestaudio")
+                            .arg("-g")
+                            .arg(&url)
+                            .output()
+                            .await?;
+                        let audio_url = String::from_utf8(output.stdout)?.trim().to_string();
+
+                        let source =
+                            ffmpeg_optioned(audio_url, &FFMPEG_OPTIONS, &AUDIO_OPTIONS).await?;
+
+                        let (track, _track_handle) = songbird::create_player(source);
+
+                        let ctx_clone = ctx.clone();
+                        let tracker_clone = app.tracking.clone();
+                        let skip_tracker_clone = app.skip_tracker.clone();
+                        let msg_clone = msg.clone();
+                        let node = Node::from(url.to_string(), duration);
+
+                        {
+                            let mut handler = handler_lock.lock().await;
+                            handler.play_only(track);
+                        }
+
+                        tokio::spawn(async move {
+                            tracker(
+                                ctx_clone,
+                                skip_tracker_clone,
+                                tracker_clone,
+                                msg_clone,
+                                node,
+                            )
+                            .await;
+                        });
+
+                        tokio::select! {
+                            _ = sleep(duration + Duration::from_secs(1)) => {}
+                            _ = async {
+                                loop {
+                                    sleep(Duration::from_millis(100)).await;
+                                    if app.skip_loop.load(Ordering::SeqCst) {
+                                        app.skip_loop.store(false, Ordering::SeqCst);
+                                        break;
+                                    }
+                                }
+                            } => { break;}
+                        }
+                        iterations += 1;
+                        if iterations >= count {
+                            break;
+                        }
+                    }
+                    {
+                        let mut looping_lock = app.looping.lock().await;
+                        *looping_lock = false;
+                    }
+                } else {
+                    println!("Failed to join voice");
+                }
+            } else {
+                msg.channel_id
+                    .say(
+                        &ctx.http,
+                        "No loop count specified. Expected format '!loop <count> <url>'",
+                    )
+                    .await
+                    .unwrap();
+            }
+        }
+        Err(_) => {
+            msg.reply(ctx, "Bad URL").await.unwrap();
+        }
+    }
+    Ok(())
+}
+
 async fn manage_queue(
     message: &str,
     msg: Message,
@@ -139,11 +260,27 @@ async fn manage_queue(
             if let Err(why) = msg.delete(&ctx).await {
                 println!("Error deleting message: {:?}", why);
             }
+            {
+                let looping_lock = app.looping.try_lock();
+                match looping_lock {
+                    Ok(lock) => {
+                        if *lock {
+                            msg.channel_id
+                                .say(&ctx.http, "You loopin rn")
+                                .await
+                                .unwrap();
+
+                            return;
+                        }
+                    }
+                    Err(_) => {}
+                }
+            }
             let duration: Duration = get_video_duration(&url).await.unwrap();
 
             {
                 let mut queue = VIDEO_QUEUE.lock().await;
-                queue.push_back(Node::from(url.clone(), duration));
+                queue.push_back(Node::from(url.to_string(), duration));
             }
 
             let guild = ctx.cache.guild(guild_id).unwrap();
@@ -270,31 +407,9 @@ async fn play_youtube(
                 .arg(&node.url)
                 .output()
                 .await?;
-
             let audio_url = String::from_utf8(output.stdout)?.trim().to_string();
 
-            let ffmpeg_options: [&str; 6] = [
-                "-reconnect",
-                "1",
-                "-reconnect_streamed",
-                "1",
-                "-reconnect_delay_max",
-                "5",
-            ];
-
-            let audio_options: [&str; 9] = [
-                "-f",
-                "s16le",
-                "-ac",
-                "2",
-                "-ar",
-                "48000",
-                "-acodec",
-                "pcm_f32le",
-                "-",
-            ];
-
-            let source = ffmpeg_optioned(audio_url, &ffmpeg_options, &audio_options).await?;
+            let source = ffmpeg_optioned(audio_url, &FFMPEG_OPTIONS, &AUDIO_OPTIONS).await?;
             let (track, _track_handle) = songbird::create_player(source);
 
             handler.play_only(track);
@@ -404,7 +519,33 @@ async fn skip_current_song(
 
     app.skip_player.store(true, Ordering::SeqCst);
     app.skip_tracker.store(true, Ordering::SeqCst);
+    app.skip_loop.store(true, Ordering::SeqCst);
     Ok(())
+}
+
+async fn skip_all_enabled(app: &Handler) {
+    {
+        let mut queue = VIDEO_QUEUE.lock().await;
+        queue.clear();
+    }
+    {
+        let playing_lock = app.playing.lock().await;
+        if *playing_lock {
+            app.skip_player.store(true, Ordering::SeqCst);
+        }
+    }
+    {
+        let tracking_lock = app.tracking.lock().await;
+        if *tracking_lock {
+            app.skip_tracker.store(true, Ordering::SeqCst);
+        }
+    }
+    {
+        let looping_lock = app.looping.lock().await;
+        if *looping_lock {
+            app.skip_loop.store(true, Ordering::SeqCst);
+        }
+    }
 }
 
 async fn chat_gpt(api_key: &str, prompt: &str) -> String {

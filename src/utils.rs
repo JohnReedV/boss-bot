@@ -8,13 +8,13 @@ use std::{
 use tokio::sync::Mutex;
 use crate::{Node, VIDEO_QUEUE};
 
-pub fn extract_youtube_url(input: &str) -> Result<String, Box<dyn std::error::Error + Send>> {
+pub fn extract_youtube_url(input: &str) -> Result<&str, Box<dyn std::error::Error + Send>> {
     let start_index = input.find("https://www.youtube.com/watch?v=");
     match start_index {
         Some(start) => {
             let potential_url = &input[start..];
             if is_valid_youtube_url(potential_url) {
-                return Ok(potential_url.to_string());
+                return Ok(potential_url);
             }
             Err(Box::new(std::io::Error::new(
                 std::io::ErrorKind::Other,

@@ -1,5 +1,5 @@
+use crate::Regex;
 use lazy_static::lazy_static;
-
 use serenity::prelude::TypeMapKey;
 use songbird::Songbird;
 use std::{
@@ -12,6 +12,7 @@ use tokio::sync::Mutex;
 lazy_static! {
     #[derive(Debug)]
     pub static ref VIDEO_QUEUE: Mutex<VecDeque<Node>> = Mutex::new(VecDeque::new());
+    pub static ref RE: Regex = Regex::new(r"-?\d+").unwrap();
 }
 
 pub const HELP_MESSAGE: &str = "💅🏻 **Woman Commands** ☕\n\
@@ -20,9 +21,31 @@ pub const HELP_MESSAGE: &str = "💅🏻 **Woman Commands** ☕\n\
 2. !q              -- Display the current audio queue\n\
 3. !skip           -- Skip the currently playing song\n\
 4. !leave          -- Leave the voice channel and clear the queue\n\
-5. !help           -- Displays this page\n\
+5. !loop           -- Loop a song using \"!loop <count> <url>\" \n\
 6. !               -- Everything proceeding from \"!\" is a GPT prompt\n\
+7. !help           -- Displays this page\n\
 ```";
+
+pub const FFMPEG_OPTIONS: [&str; 6] = [
+    "-reconnect",
+    "1",
+    "-reconnect_streamed",
+    "1",
+    "-reconnect_delay_max",
+    "5",
+];
+
+pub const AUDIO_OPTIONS: [&str; 9] = [
+    "-f",
+    "s16le",
+    "-ac",
+    "2",
+    "-ar",
+    "48000",
+    "-acodec",
+    "pcm_f32le",
+    "-",
+];
 
 pub struct Node {
     pub url: String,
@@ -52,8 +75,10 @@ impl TypeMapKey for SongbirdKey {
 pub struct Handler {
     pub playing: Arc<Mutex<bool>>,
     pub tracking: Arc<Mutex<bool>>,
+    pub looping: Arc<Mutex<bool>>,
     pub skip_player: Arc<AtomicBool>,
     pub skip_tracker: Arc<AtomicBool>,
+    pub skip_loop: Arc<AtomicBool>,
 }
 
 impl Default for Handler {
@@ -61,8 +86,10 @@ impl Default for Handler {
         Handler {
             playing: Arc::new(Mutex::new(false)),
             tracking: Arc::new(Mutex::new(false)),
+            looping: Arc::new(Mutex::new(false)),
             skip_player: Arc::new(AtomicBool::new(false)),
             skip_tracker: Arc::new(AtomicBool::new(false)),
+            skip_loop: Arc::new(AtomicBool::new(false)),
         }
     }
 }
