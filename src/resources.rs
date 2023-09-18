@@ -10,7 +10,7 @@ use std::{
 use tokio::sync::Mutex;
 
 lazy_static! {
-    #[derive(Debug)]
+    #[derive(Debug, Clone, Copy)]
     pub static ref VIDEO_QUEUE: Mutex<VecDeque<Node>> = Mutex::new(VecDeque::new());
     pub static ref RE: Regex = Regex::new(r"-?\d+").unwrap();
 }
@@ -47,6 +47,7 @@ pub const AUDIO_OPTIONS: [&str; 9] = [
     "-",
 ];
 
+#[derive(Debug, Clone)]
 pub struct Node {
     pub url: String,
     pub duration: Duration,

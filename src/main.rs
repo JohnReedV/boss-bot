@@ -62,19 +62,16 @@ impl EventHandler for Handler {
             manage_queue(message, msg.clone(), guild_id, &ctx, manager, self.clone()).await;
         } else if message.starts_with("! q") || message.starts_with("!q") {
             msg.delete(&ctx).await.unwrap();
-            let queue = get_video_queue().lock().await;
-
-            say_queue(msg.clone(), &ctx, queue).await;
+            let queue = VIDEO_QUEUE.lock().await;
+            let queue_clone = queue.clone();
+            drop(queue);
+            say_queue(msg.clone(), &ctx, queue_clone).await;
         } else if message.starts_with("! skip") || message.starts_with("!skip") {
-            skip_current_song(guild_id, manager, self.clone())
-                .await
-                .unwrap();
+            skip_all_enabled(self.clone(), guild_id, manager).await;
         } else if message.starts_with("! leave") || message.starts_with("!leave") {
             if manager.get(guild_id).is_some() {
                 manager.remove(guild_id).await.unwrap();
-                skip_current_song(guild_id, manager, self.clone())
-                    .await
-                    .unwrap();
+                skip_all_enabled(self.clone(), guild_id, manager).await;
             }
             {
                 let mut queue = VIDEO_QUEUE.lock().await;

@@ -273,11 +273,11 @@ pub async fn tracker(
             break;
         }
     }
-    created_message.delete(&ctx.http).await.unwrap();
     {
         let mut tracking = tracking_mutex.lock().await;
         *tracking = false;
     }
+    created_message.delete(&ctx.http).await.unwrap();
 }
 
 pub async fn loop_song(
@@ -291,7 +291,23 @@ pub async fn loop_song(
             let message: String = full_message.replace(url, "");
 
             if let Some(cap) = RE.captures_iter(&message).next() {
-                skip_all_enabled(app).await;
+                {
+                    let playing_lock = app.playing.try_lock();
+                    match playing_lock {
+                        Ok(lock) => {
+                            if *lock {
+                                msg.channel_id
+                                    .say(&ctx.http, "not loopin til queue done")
+                                    .await
+                                    .unwrap();
+
+                                println!("not looping while music queue running");
+                                return Ok(());
+                            }
+                        }
+                        Err(_) => {}
+                    }
+                }
 
                 let loop_count_message = &cap[0];
                 let count = match loop_count_message.parse::<usize>() {
@@ -368,7 +384,15 @@ pub async fn loop_song(
                         });
 
                         tokio::select! {
-                            _ = sleep(duration + Duration::from_secs(1)) => {}
+                            _ = sleep(duration + Duration::from_secs(1)) => {
+                                iterations += 1;
+                                if iterations >= count {
+                                    let mut looping_lock = app.looping.lock().await;
+                                    *looping_lock = false;
+                                    drop(looping_lock);
+                                    break;
+                                }
+                            }
                             _ = async {
                                 loop {
                                     sleep(Duration::from_millis(100)).await;
@@ -377,16 +401,13 @@ pub async fn loop_song(
                                         break;
                                     }
                                 }
-                            } => { break;}
+                            } => {
+                                let mut looping_lock = app.looping.lock().await;
+                                *looping_lock = false;
+                                drop(looping_lock);
+                                break;
+                            }
                         }
-                        iterations += 1;
-                        if iterations >= count {
-                            break;
-                        }
-                    }
-                    {
-                        let mut looping_lock = app.looping.lock().await;
-                        *looping_lock = false;
                     }
                 } else {
                     println!("Failed to join voice");
@@ -408,20 +429,29 @@ pub async fn loop_song(
     Ok(())
 }
 
-pub async fn skip_current_song(
-    guild_id: GuildId,
-    manager: Arc<Songbird>,
-    app: &Handler,
-) -> Result<(), Box<dyn std::error::Error>> {
+pub async fn skip_all_enabled(app: &Handler, guild_id: GuildId, manager: Arc<Songbird>) {
     if let Some(handler_lock) = manager.get(guild_id) {
         let mut handler = handler_lock.lock().await;
         handler.stop();
     }
-
-    app.skip_player.store(true, Ordering::SeqCst);
-    app.skip_tracker.store(true, Ordering::SeqCst);
-    app.skip_loop.store(true, Ordering::SeqCst);
-    Ok(())
+    {
+        let playing_lock = app.playing.lock().await;
+        if *playing_lock {
+            app.skip_player.store(true, Ordering::SeqCst);
+        }
+    }
+    {
+        let tracking_lock = app.tracking.lock().await;
+        if *tracking_lock {
+            app.skip_tracker.store(true, Ordering::SeqCst);
+        }
+    }
+    {
+        let looping_lock = app.looping.lock().await;
+        if *looping_lock {
+            app.skip_loop.store(true, Ordering::SeqCst);
+        }
+    }
 }
 
 pub async fn chat_gpt(api_key: &str, prompt: &str) -> String {
@@ -438,11 +468,7 @@ pub async fn chat_gpt(api_key: &str, prompt: &str) -> String {
     return format!("{}", res.choices[0].message.content.clone());
 }
 
-pub async fn say_queue(
-    msg: Message,
-    ctx: &Context,
-    queue: tokio::sync::MutexGuard<'_, VecDeque<Node>>,
-) {
+pub async fn say_queue(msg: Message, ctx: &Context, queue: VecDeque<Node>) {
     let mut name_str = String::from("🎵 **Queue** 🎵\n```markdown\n");
     let mut tracker = false;
 

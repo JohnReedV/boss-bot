@@ -1,14 +1,9 @@
 use regex::Regex;
 use serenity::{model::prelude::ChannelId, client::Context};
 use std::{
-    collections::VecDeque,
     process::Command,
     time::Duration,
 };
-use tokio::sync::Mutex;
-use crate::{Node, VIDEO_QUEUE};
-use crate::Handler;
-use std::sync::atomic::Ordering;
 
 pub fn extract_youtube_url(input: &str) -> Result<&str, Box<dyn std::error::Error + Send>> {
     let start_index = input.find("https://www.youtube.com/watch?v=");
@@ -33,10 +28,6 @@ pub fn extract_youtube_url(input: &str) -> Result<&str, Box<dyn std::error::Erro
 pub fn is_valid_youtube_url(url: &str) -> bool {
     let re = Regex::new(r"https?://(www\.)?youtube\.com/watch\?v=[a-zA-Z0-9_-]+").unwrap();
     return re.is_match(url);
-}
-
-pub fn get_video_queue() -> &'static Mutex<VecDeque<Node>> {
-    &VIDEO_QUEUE
 }
 
 pub async fn get_video_title(video_url: &String) -> Result<String, std::io::Error> {
@@ -115,29 +106,4 @@ pub async fn send_large_message(
     }
 
     Ok(())
-}
-
-pub async fn skip_all_enabled(app: &Handler) {
-    {
-        let mut queue = VIDEO_QUEUE.lock().await;
-        queue.clear();
-    }
-    {
-        let playing_lock = app.playing.lock().await;
-        if *playing_lock {
-            app.skip_player.store(true, Ordering::SeqCst);
-        }
-    }
-    {
-        let tracking_lock = app.tracking.lock().await;
-        if *tracking_lock {
-            app.skip_tracker.store(true, Ordering::SeqCst);
-        }
-    }
-    {
-        let looping_lock = app.looping.lock().await;
-        if *looping_lock {
-            app.skip_loop.store(true, Ordering::SeqCst);
-        }
-    }
 }
