@@ -11,3 +11,7 @@ openai-rust = "0.5.1"
 songbird = "0.3.2"
 regex = "1.9.5"
 lazy_static = "1.4.0"
+
+[profile.release]
+opt-level = 3
+lto = true

@@ -65,6 +65,7 @@ impl EventHandler for Handler {
             let queue = VIDEO_QUEUE.lock().await;
             let queue_clone = queue.clone();
             drop(queue);
+            
             say_queue(msg.clone(), &ctx, queue_clone).await;
         } else if message.starts_with("! skip") || message.starts_with("!skip") {
             skip_all_enabled(self.clone(), guild_id, manager).await;
