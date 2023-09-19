@@ -116,11 +116,6 @@ pub async fn manage_queue(
                                                 let mut playing_lock = app.playing.lock().await;
                                                 *playing_lock = false;
                                             }
-                                            {
-                                                if *app.tracking.lock().await {
-                                                    app.skip_tracker.store(true, Ordering::SeqCst);
-                                                }
-                                            }
                                         }
                                         _ = async {
                                             loop {
@@ -281,7 +276,6 @@ pub async fn tracker(
             skip.store(false, Ordering::SeqCst);
             break;
         }
-        sleep(Duration::from_secs(count)).await;
     }
     {
         let mut tracking = tracking_mutex.lock().await;
