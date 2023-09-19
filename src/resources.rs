@@ -19,7 +19,7 @@ pub const NUMBER_OF_PROGRESS_BARS: u64 = 49;
 
 pub const HELP_MESSAGE: &str = "💅🏻 **Woman Commands** ☕\n\
 ```markdown\n\
-1. !<URL>       -- Add a YouTube video to the queue\n\
+1. !<URL>               -- Add a YouTube video to the queue\n\
 2. !play <query>        -- Plays the first YT search result\n\
 3. !loop <count> <url>  -- Loop a song \n\
 4. !q                   -- Display the current audio queue\n\
