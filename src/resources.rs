@@ -20,12 +20,13 @@ pub const NUMBER_OF_PROGRESS_BARS: u64 = 49;
 pub const HELP_MESSAGE: &str = "💅🏻 **Woman Commands** ☕\n\
 ```markdown\n\
 1. !https://<URL>  -- Add a YouTube video to the queue\n\
-2. !q              -- Display the current audio queue\n\
-3. !skip           -- Skip the currently playing song\n\
-4. !leave          -- Leave the voice channel and clear the queue\n\
-5. !loop           -- Loop a song using \"!loop <count> <url>\" \n\
-6. !               -- Everything proceeding from \"!\" is a GPT prompt\n\
-7. !help           -- Displays this page\n\
+2. !play <query>   -- Plays the first YT search result\n\
+3. !q              -- Display the current audio queue\n\
+4. !skip           -- Skip the currently playing song\n\
+5. !leave          -- Leave the voice channel and clear the queue\n\
+6. !loop           -- Loop a song using \"!loop <count> <url>\" \n\
+7. !               -- Everything proceeding from \"!\" is a GPT prompt\n\
+8. !help           -- Displays this page\n\
 ```";
 
 pub const FFMPEG_OPTIONS: [&str; 6] = [

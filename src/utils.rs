@@ -1,9 +1,7 @@
 use regex::Regex;
-use serenity::{model::prelude::ChannelId, client::Context};
-use std::{
-    process::Command,
-    time::Duration,
-};
+use serenity::{client::Context, model::prelude::ChannelId};
+use std::{process::Command, time::Duration};
+use tokio::process::Command as TokioCommand;
 
 pub fn extract_youtube_url(input: &str) -> Result<&str, Box<dyn std::error::Error + Send>> {
     let start_index = input.find("https://www.youtube.com/watch?v=");
@@ -106,4 +104,24 @@ pub async fn send_large_message(
     }
 
     Ok(())
+}
+
+pub async fn get_searched_url(
+    search_query: &str,
+) -> Result<String, Box<dyn std::error::Error + Send + Sync>> {
+    let search_url = format!("ytsearch1:{}", search_query);
+    let output = TokioCommand::new("yt-dlp")
+        .arg("--default-search")
+        .arg("ytsearch")
+        .arg("--get-id")
+        .arg(&search_url)
+        .output()
+        .await?;
+
+    let output_str = String::from_utf8(output.stdout)?;
+    let mut lines = output_str.lines();
+    let video_id = lines.next().unwrap_or_default();
+    let video_url = format!("https://www.youtube.com/watch?v={}", video_id);
+
+    return Ok(video_url);
 }

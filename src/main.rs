@@ -65,7 +65,7 @@ impl EventHandler for Handler {
             let queue = VIDEO_QUEUE.lock().await;
             let queue_clone = queue.clone();
             drop(queue);
-            
+
             say_queue(msg.clone(), &ctx, queue_clone).await;
         } else if message.starts_with("! skip") || message.starts_with("!skip") {
             skip_all_enabled(self.clone(), guild_id, manager).await;
@@ -86,6 +86,19 @@ impl EventHandler for Handler {
             loop_song(self.clone(), message, msg.clone(), &ctx)
                 .await
                 .unwrap();
+        } else if message.starts_with("! play ") || message.starts_with("!play ") {
+            let query = message.split_at(5).1;
+            let url = get_searched_url(query).await.unwrap();
+
+            manage_queue(
+                url.as_str(),
+                msg.clone(),
+                guild_id,
+                &ctx,
+                manager,
+                self.clone(),
+            )
+            .await;
         } else if message.starts_with("!") {
             message = message.split_at(2).1;
 
