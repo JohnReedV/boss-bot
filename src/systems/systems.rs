@@ -1,28 +1,15 @@
 use crate::resources::*;
 use crate::utils::*;
 use crate::Handler;
-use loop_songs;
-use tracker;
-use manage_queue;
-use play_youtube;
 use openai_rust::{chat::ChatArguments, chat::Message as OpenAiMessage, Client as OpenAiClient};
 use serenity::{
     model::{channel::Message, prelude::GuildId},
     prelude::Context,
 };
-use songbird::{input::ffmpeg_optioned, Songbird};
+use songbird::Songbird;
 use std::{
-    cmp::max,
     collections::VecDeque,
-    sync::{
-        atomic::{AtomicBool, Ordering},
-        Arc,
-    },
-    time::Duration,
-};
-use tokio::{
-    process::Command as TokioCommand,
-    time::{sleep, Instant},
+    sync::{atomic::Ordering, Arc},
 };
 
 pub async fn skip_all_enabled(app: &Handler, guild_id: GuildId, manager: Arc<Songbird>) {

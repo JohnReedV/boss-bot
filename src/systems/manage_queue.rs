@@ -1,7 +1,17 @@
-use systems;
-use play_youtube;
-use loop_songs;
-use tracker;
+use crate::resources::*;
+use crate::systems::play_youtube;
+use crate::utils::*;
+use crate::Handler;
+use serenity::{
+    model::{channel::Message, prelude::GuildId},
+    prelude::Context,
+};
+use songbird::Songbird;
+use std::{
+    sync::{atomic::Ordering, Arc},
+    time::Duration,
+};
+use tokio::time::sleep;
 
 pub async fn manage_queue(
     message: &str,
@@ -101,7 +111,7 @@ pub async fn manage_queue(
                                         }
                                         _ = async {
                                             loop {
-                                                tokio::time::sleep(Duration::from_millis(100)).await;
+                                                sleep(Duration::from_millis(100)).await;
                                                 if app.skip_player.load(Ordering::SeqCst) {
                                                     app.skip_player.store(false, Ordering::SeqCst);
                                                     break;
