@@ -1,0 +1,8 @@
+version: '3'
+services:
+  boss-bot:
+    build: .
+    image: spiigot/boss-bot:latest
+    container_name: boss-bot-instance
+    environment:
+      - DEBIAN_FRONTEND=noninteractive
