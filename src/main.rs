@@ -13,7 +13,7 @@ use resources::*;
 pub mod utils;
 use utils::*;
 pub mod systems;
-use systems::{chat_gpt, loop_song, manage_queue, say_queue, skip_all_enabled};
+use systems::{chat_gpt, dalle_image, loop_song, manage_queue, say_queue, skip_all_enabled};
 
 #[tokio::main]
 async fn main() {
@@ -96,9 +96,23 @@ impl EventHandler for Handler {
                 guild_id,
                 &ctx,
                 manager,
-                self.clone(),
+                self,
             )
             .await;
+        } else if message.starts_with("! image") || message.starts_with("!image") {
+            let api_key: String = env::var("OPENAI_KEY").expect("Expected OPENAI_KEY to be set");
+            let query = message.split_at(5).1;
+            let prompt: String = query.to_string();
+
+            let response: String = tokio::task::spawn_blocking(move || {
+                let rt: tokio::runtime::Runtime = tokio::runtime::Runtime::new().unwrap();
+                rt.block_on(dalle_image(&api_key, &prompt))
+            })
+            .await
+            .unwrap();
+
+            msg.reply(&ctx, &response).await.expect("Expected prompt message");
+
         } else if message.starts_with("!") {
             message = message.split_at(2).1;
 

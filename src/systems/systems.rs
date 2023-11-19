@@ -2,6 +2,8 @@ use crate::resources::*;
 use crate::utils::*;
 use crate::Handler;
 use openai_rust::{chat::ChatArguments, chat::Message as OpenAiMessage, Client as OpenAiClient};
+use reqwest::Client;
+use serde_json::Value;
 use serenity::{
     model::{channel::Message, prelude::GuildId},
     prelude::Context,
@@ -40,7 +42,7 @@ pub async fn skip_all_enabled(app: &Handler, guild_id: GuildId, manager: Arc<Son
 pub async fn chat_gpt(api_key: &str, prompt: &str) -> String {
     let client: OpenAiClient = OpenAiClient::new(api_key);
     let args: ChatArguments = ChatArguments::new(
-        "gpt-3.5-turbo",
+        "gpt-4-1106-preview",
         vec![OpenAiMessage {
             role: "user".to_owned(),
             content: prompt.to_owned(),
@@ -49,6 +51,40 @@ pub async fn chat_gpt(api_key: &str, prompt: &str) -> String {
 
     let res = client.create_chat(args).await.unwrap();
     return format!("{}", res.choices[0].message.content.clone());
+}
+
+pub async fn dalle_image(api_key: &str, prompt: &str) -> String {
+    let client = Client::new();
+    let url = "https://api.openai.com/v1/images/generations";
+
+    match client
+        .post(url)
+        .bearer_auth(api_key)
+        .json(&serde_json::json!({
+            "prompt": prompt,
+            "model": "dall-e-3",
+
+        }))
+        .send()
+        .await
+    {
+        Ok(response) => match response.text().await {
+            Ok(response_body) => {
+                println!("{:?}", response_body);
+                let json: Value = match serde_json::from_str(&response_body) {
+                    Ok(json) => json,
+                    Err(_) => return "Failed to parse JSON".to_string(),
+                };
+
+                json["data"][0]["url"]
+                    .as_str()
+                    .unwrap_or("No image URL found in servers response")
+                    .to_string()
+            }
+            Err(_) => "Failed to get response text from JSON".to_string(),
+        },
+        Err(_) => "Failed to send request".to_string(),
+    }
 }
 
 pub async fn say_queue(msg: Message, ctx: &Context, queue: VecDeque<Node>) {
