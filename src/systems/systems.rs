@@ -53,7 +53,7 @@ pub async fn chat_gpt(api_key: &str, prompt: &str) -> String {
     return format!("{}", res.choices[0].message.content.clone());
 }
 
-pub async fn dalle_image(api_key: &str, prompt: &str) -> String {
+pub async fn dalle_image(api_key: &str, prompt: &str, size: &str) -> String {
     let client = Client::new();
     let url = "https://api.openai.com/v1/images/generations";
 
@@ -63,6 +63,9 @@ pub async fn dalle_image(api_key: &str, prompt: &str) -> String {
         .json(&serde_json::json!({
             "prompt": prompt,
             "model": "dall-e-3",
+            "n": 1,
+            "quality": "hd",
+            "size": size
 
         }))
         .send()
@@ -70,7 +73,6 @@ pub async fn dalle_image(api_key: &str, prompt: &str) -> String {
     {
         Ok(response) => match response.text().await {
             Ok(response_body) => {
-                println!("{:?}", response_body);
                 let json: Value = match serde_json::from_str(&response_body) {
                     Ok(json) => json,
                     Err(_) => return "Failed to parse JSON".to_string(),
