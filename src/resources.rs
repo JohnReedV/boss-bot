@@ -25,8 +25,9 @@ pub const HELP_MESSAGE: &str = "💅🏻 **Woman Commands** ☕\n\
 4. !q                   -- Display the current audio queue\n\
 5. !skip                -- Skip the currently playing song\n\
 6. !leave               -- Leave the voice channel and clear the queue\n\
-7. !                    -- Everything proceeding from \"!\" is a GPT prompt\n\
-8. !help                -- Displays this page\n\
+7. !image               -- Everything after \"!image\" is a DALLE prompt\n\
+8. !                    -- Everything proceeding from \"!\" is a GPT4 prompt\n\
+9. !help                -- Displays this page\n\
 ```";
 
 pub const FFMPEG_OPTIONS: [&str; 6] = [
