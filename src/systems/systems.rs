@@ -5,7 +5,10 @@ use openai_rust::{chat::ChatArguments, chat::Message as OpenAiMessage, Client as
 use reqwest::Client;
 use serde_json::Value;
 use serenity::{
-    model::{channel::Message, prelude::GuildId},
+    model::{
+        channel::Message,
+        prelude::{GuildId, ReactionType},
+    },
     prelude::Context,
 };
 use songbird::Songbird;
@@ -13,6 +16,7 @@ use std::{
     collections::VecDeque,
     sync::{atomic::Ordering, Arc},
 };
+use tokio::time::{sleep, Duration};
 
 pub async fn skip_all_enabled(app: &Handler, guild_id: GuildId, manager: Arc<Songbird>) {
     if let Some(handler_lock) = manager.get(guild_id) {
@@ -53,9 +57,51 @@ pub async fn chat_gpt(api_key: &str, prompt: &str) -> String {
     return format!("{}", res.choices[0].message.content.clone());
 }
 
-pub async fn dalle_image(api_key: &str, prompt: &str, size: &str) -> String {
+pub async fn dalle_image(ctx: Context, msg: Message, api_key: &str, prompt: &str) -> String {
     let client = Client::new();
     let url = "https://api.openai.com/v1/images/generations";
+
+    let bot_msg = msg
+        .reply(&ctx, "Select a size")
+        .await
+        .expect("Expected prompt message");
+
+    let sizes = vec!["🟦", "↔", "↕️"];
+    for emoji in &sizes {
+        bot_msg
+            .react(&ctx.http, ReactionType::Unicode(emoji.to_string()))
+            .await
+            .expect("Expected to react");
+    }
+
+    let mut selected_size = None;
+    while selected_size.is_none() {
+        for emoji in &sizes {
+            let reaction_type = ReactionType::Unicode(emoji.to_string());
+            if let Ok(users) = bot_msg
+                .reaction_users(&ctx.http, reaction_type, None, None)
+                .await
+            {
+                if users.iter().any(|user| user.id == msg.author.id) {
+                    selected_size = match *emoji {
+                        "🟦" => Some("1024x1024"),
+                        "↔" => Some("1792x1024"),
+                        "↕️" => Some("1024x1792"),
+                        _ => None,
+                    };
+                    break;
+                }
+            }
+        }
+        if selected_size.is_none() {
+            sleep(Duration::from_secs(1)).await;
+        }
+    }
+
+    bot_msg.delete(&ctx).await.expect("expected to delete");
+    let size = selected_size.unwrap().to_string();
+
+    let bot_msg_2 = msg.reply(&ctx, "Generating...").await.unwrap();
 
     match client
         .post(url)
@@ -73,6 +119,7 @@ pub async fn dalle_image(api_key: &str, prompt: &str, size: &str) -> String {
     {
         Ok(response) => match response.text().await {
             Ok(response_body) => {
+                bot_msg_2.delete(&ctx).await.unwrap();
                 let json: Value = match serde_json::from_str(&response_body) {
                     Ok(json) => json,
                     Err(_) => return "Failed to parse JSON".to_string(),
@@ -83,9 +130,15 @@ pub async fn dalle_image(api_key: &str, prompt: &str, size: &str) -> String {
                     .unwrap_or("No image URL found in servers response")
                     .to_string()
             }
-            Err(_) => "Failed to get response text from JSON".to_string(),
+            Err(_) => {
+                bot_msg_2.delete(&ctx).await.unwrap();
+                return "Failed to get response text from JSON".to_string();
+            }
         },
-        Err(_) => "Failed to send request".to_string(),
+        Err(_) => {
+            bot_msg_2.delete(&ctx).await.unwrap();
+            return "Failed to send request".to_string();
+        }
     }
 }
 

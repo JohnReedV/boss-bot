@@ -3,10 +3,7 @@ use serenity::{
     async_trait,
     client::{Client, EventHandler},
     framework::StandardFramework,
-    model::{
-        channel::{Message, ReactionType},
-        gateway::GatewayIntents,
-    },
+    model::{channel::Message, gateway::GatewayIntents},
     prelude::Context,
 };
 use songbird::{SerenityInit, Songbird};
@@ -17,7 +14,6 @@ pub mod utils;
 use utils::*;
 pub mod systems;
 use systems::{chat_gpt, dalle_image, loop_song, manage_queue, say_queue, skip_all_enabled};
-use tokio::time::{sleep, Duration};
 
 #[tokio::main]
 async fn main() {
@@ -87,9 +83,7 @@ impl EventHandler for Handler {
             msg.channel_id.say(&ctx.http, HELP_MESSAGE).await.unwrap();
         } else if message.starts_with("! loop ") || message.starts_with("!loop ") {
             msg.delete(&ctx).await.unwrap();
-            loop_song(self, message, msg.clone(), &ctx)
-                .await
-                .unwrap();
+            loop_song(self, message, msg.clone(), &ctx).await.unwrap();
         } else if message.starts_with("! play ") || message.starts_with("!play ") {
             let query = message.split_at(5).1;
             let url = get_searched_url(query).await.unwrap();
@@ -100,68 +94,25 @@ impl EventHandler for Handler {
             let query = message.split_at(5).1;
             let prompt: String = query.to_string();
 
-            let bot_msg = msg
-                .reply(&ctx, "Select a size")
-                .await
-                .expect("Expected prompt message");
-
-            let sizes = vec!["🟦", "↔", "↕️"];
-            for emoji in &sizes {
-                bot_msg
-                    .react(&ctx.http, ReactionType::Unicode(emoji.to_string()))
-                    .await
-                    .expect("Expected to react");
-            }
-
-            let mut selected_size = None;
-            while selected_size.is_none() {
-                for emoji in &sizes {
-                    let reaction_type = ReactionType::Unicode(emoji.to_string());
-                    if let Ok(users) = bot_msg
-                        .reaction_users(&ctx.http, reaction_type, None, None)
-                        .await
-                    {
-                        if users.iter().any(|user| user.id == msg.author.id) {
-                            selected_size = match *emoji {
-                                "🟦" => Some("1024x1024"),
-                                "↔" => Some("1792x1024"),
-                                "↕️" => Some("1024x1792"),
-                                _ => None,
-                            };
-                            break;
-                        }
-                    }
-                }
-                if selected_size.is_none() {
-                    sleep(Duration::from_secs(1)).await;
-                }
-            }
-
-            let selected_size: &str = selected_size.unwrap();
-            
-            bot_msg.delete(&ctx).await.expect("expected to delete");
-            let bot_msg_2 = msg
-                .reply(&ctx, "Generating...")
-                .await
-                .unwrap();
+            let msg_clone = msg.clone();
+            let ctx_clone = ctx.clone();
 
             let response = tokio::task::spawn_blocking(move || {
                 let rt: tokio::runtime::Runtime = tokio::runtime::Runtime::new().unwrap();
-                rt.block_on(dalle_image(&api_key, &prompt, selected_size))
+                rt.block_on(dalle_image(ctx_clone, msg_clone, &api_key, &prompt))
             })
             .await;
 
             match response {
                 Ok(res) => {
-                    bot_msg_2.delete(&ctx).await.unwrap();
                     msg.reply(&ctx, res).await.expect("Expected prompt message");
                 }
                 Err(_) => {
-                    bot_msg_2.delete(&ctx).await.unwrap();
-                    msg.reply(&ctx, "Strait up failed to generate that").await.unwrap();
+                    msg.reply(&ctx, "Strait up failed to generate that")
+                        .await
+                        .unwrap();
                 }
             }
-
         } else if message.starts_with("!") {
             message = message.split_at(2).1;
 
