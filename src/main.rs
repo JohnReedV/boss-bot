@@ -63,7 +63,7 @@ impl EventHandler for Handler {
         if message.starts_with("! https://") || message.starts_with("!https://") {
             message = message.split_at(1).1;
 
-            manage_queue(message, msg.clone(), guild_id, &ctx, manager, self.clone()).await;
+            manage_queue(message, msg.clone(), guild_id, &ctx, manager, self).await;
         } else if message.starts_with("! q") || message.starts_with("!q") {
             msg.delete(&ctx).await.unwrap();
             let queue = VIDEO_QUEUE.lock().await;
@@ -72,11 +72,11 @@ impl EventHandler for Handler {
 
             say_queue(msg.clone(), &ctx, queue_clone).await;
         } else if message.starts_with("! skip") || message.starts_with("!skip") {
-            skip_all_enabled(self.clone(), guild_id, manager).await;
+            skip_all_enabled(self, guild_id, manager).await;
         } else if message.starts_with("! leave") || message.starts_with("!leave") {
             if manager.get(guild_id).is_some() {
                 manager.remove(guild_id).await.unwrap();
-                skip_all_enabled(self.clone(), guild_id, manager).await;
+                skip_all_enabled(self, guild_id, manager).await;
             }
             {
                 let mut queue = VIDEO_QUEUE.lock().await;
@@ -87,7 +87,7 @@ impl EventHandler for Handler {
             msg.channel_id.say(&ctx.http, HELP_MESSAGE).await.unwrap();
         } else if message.starts_with("! loop ") || message.starts_with("!loop ") {
             msg.delete(&ctx).await.unwrap();
-            loop_song(self.clone(), message, msg.clone(), &ctx)
+            loop_song(self, message, msg.clone(), &ctx)
                 .await
                 .unwrap();
         } else if message.starts_with("! play ") || message.starts_with("!play ") {
