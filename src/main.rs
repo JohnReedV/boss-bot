@@ -114,11 +114,21 @@ impl EventHandler for Handler {
                 }
             }
         } else if message.starts_with("!") {
-            message = message.split_at(2).1;
 
             let api_key: String = env::var("OPENAI_KEY").expect("Expected OPENAI_KEY to be set");
-            let prompt: String = message.to_string();
 
+            let prompt = if let Some(attachment) = msg.attachments.first() {
+                if attachment.filename.ends_with(".txt") {
+                    attachment.download().await
+                        .map(|content| String::from_utf8_lossy(&content).into())
+                        .unwrap_or_default()
+                } else {
+                    msg.content.clone()
+                }
+            } else {
+                msg.content.split_at(2).1.to_string()
+            };
+            
             let response: String = tokio::task::spawn_blocking(move || {
                 let rt: tokio::runtime::Runtime = tokio::runtime::Runtime::new().unwrap();
                 rt.block_on(chat_gpt(&api_key, &prompt))
