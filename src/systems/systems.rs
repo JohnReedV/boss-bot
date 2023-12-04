@@ -125,9 +125,9 @@ pub async fn dalle_image(ctx: Context, msg: Message, api_key: &str, prompt: &str
                     Err(_) => return "Failed to parse JSON".to_string(),
                 };
 
-                json["data"][0]["url"]
+                return json["data"][0]["url"]
                     .as_str()
-                    .unwrap_or("No image URL found in servers response")
+                    .unwrap_or(json["error"]["message"].to_string().as_str())
                     .to_string()
             }
             Err(_) => {
