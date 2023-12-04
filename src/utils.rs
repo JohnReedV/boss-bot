@@ -93,14 +93,32 @@ pub async fn send_large_message(
 ) -> serenity::Result<()> {
     let max_length = 1950;
     let mut start = 0;
-    let mut end = std::cmp::min(max_length, message.len());
 
     while start < message.len() {
-        let part = &message[start..end];
-        channel_id.say(&ctx.http, part).await?;
+        let end;
+        let next_code_block_start = message[start..].find("```");
 
-        start = end;
-        end = std::cmp::min(end + max_length, message.len());
+        if let Some(index) = next_code_block_start {
+            if start + index == start {
+                if let Some(end_code_block) = message[start + 3..].find("```") {
+                    end = std::cmp::min(start + end_code_block + 6, message.len());
+                } else {
+                    end = message.len();
+                }
+            } else {
+                end = std::cmp::min(start + index, message.len());
+            }
+        } else {
+            end = message.len();
+        }
+
+        while start < end {
+            let message_part_end = std::cmp::min(start + max_length, end);
+            let part = &message[start..message_part_end];
+            channel_id.say(&ctx.http, part).await?;
+
+            start = message_part_end;
+        }
     }
 
     Ok(())
