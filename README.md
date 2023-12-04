@@ -24,6 +24,7 @@ Want to know what's coming up next? Type `!q` to see the current queue of songs.
 - **Skip Song**: `!skip`
 - **Loop Song**: `!loop <count> <url>`
 - **Leave Channel**: `!leave`
+- **Image Generation**: `!image`
 - **Chat with AI**: `! [Your message here]`
 - **Help**: `!help`
 
