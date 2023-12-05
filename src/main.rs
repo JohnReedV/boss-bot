@@ -97,22 +97,9 @@ impl EventHandler for Handler {
             let msg_clone = msg.clone();
             let ctx_clone = ctx.clone();
 
-            let response = tokio::task::spawn_blocking(move || {
-                let rt: tokio::runtime::Runtime = tokio::runtime::Runtime::new().unwrap();
-                rt.block_on(dalle_image(ctx_clone, msg_clone, &api_key, &prompt))
-            })
-            .await;
+            let img_url: String = dalle_image(ctx_clone, msg_clone, &api_key, &prompt).await;
+            msg.reply(&ctx, img_url).await.unwrap();
 
-            match response {
-                Ok(res) => {
-                    msg.reply(&ctx, res).await.expect("Expected prompt message");
-                }
-                Err(_) => {
-                    msg.reply(&ctx, "Strait up failed to generate that")
-                        .await
-                        .unwrap();
-                }
-            }
         } else if message.starts_with("!") {
 
             let api_key: String = env::var("OPENAI_KEY").expect("Expected OPENAI_KEY to be set");
@@ -129,12 +116,7 @@ impl EventHandler for Handler {
                 msg.content.split_at(2).1.to_string()
             };
             
-            let response: String = tokio::task::spawn_blocking(move || {
-                let rt: tokio::runtime::Runtime = tokio::runtime::Runtime::new().unwrap();
-                rt.block_on(chat_gpt(&api_key, &prompt))
-            })
-            .await
-            .unwrap();
+            let response: String = chat_gpt(&api_key, &prompt).await;
 
             send_large_message(&ctx, msg.channel_id, &response)
                 .await
