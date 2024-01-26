@@ -46,7 +46,7 @@ pub async fn skip_all_enabled(app: &Handler, guild_id: GuildId, manager: Arc<Son
 pub async fn chat_gpt(api_key: &str, prompt: &str) -> String {
     let client: OpenAiClient = OpenAiClient::new(api_key);
     let args: ChatArguments = ChatArguments::new(
-        "gpt-4-1106-preview",
+        "gpt-4-0125-preview",
         vec![OpenAiMessage {
             role: "user".to_owned(),
             content: prompt.to_owned(),
