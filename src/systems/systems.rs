@@ -1,7 +1,6 @@
 use crate::resources::*;
 use crate::utils::*;
 use crate::Handler;
-use openai_rust::{chat::ChatArguments, chat::Message as OpenAiMessage, Client as OpenAiClient};
 use reqwest::Client;
 use serde_json::Value;
 use serenity::{
@@ -17,6 +16,9 @@ use std::{
     sync::{atomic::Ordering, Arc},
 };
 use tokio::time::{sleep, Duration};
+
+use ollama_rs::generation::completion::request::GenerationRequest;
+use ollama_rs::Ollama;
 
 pub async fn skip_all_enabled(app: &Handler, guild_id: GuildId, manager: Arc<Songbird>) {
     if let Some(handler_lock) = manager.get(guild_id) {
@@ -43,18 +45,17 @@ pub async fn skip_all_enabled(app: &Handler, guild_id: GuildId, manager: Arc<Son
     }
 }
 
-pub async fn chat_gpt(api_key: &str, prompt: &str) -> String {
-    let client: OpenAiClient = OpenAiClient::new(api_key);
-    let args: ChatArguments = ChatArguments::new(
-        "gpt-4-0125-preview",
-        vec![OpenAiMessage {
-            role: "user".to_owned(),
-            content: prompt.to_owned(),
-        }],
-    );
+pub async fn ollama(prompt: String) -> String {
+    let ollama = Ollama::default();
+    let model = MODEL.to_string();
 
-    let res = client.create_chat(args).await.unwrap();
-    return format!("{}", res.choices[0].message.content.clone());
+    let gen_req = GenerationRequest::new(model, prompt)
+		.system(DEFAULT_SYSTEM_MOCK.to_string());
+
+        let res = ollama.generate(gen_req).await.unwrap();
+        println!("->> res {}", res.response);
+
+    return res.response;
 }
 
 pub async fn dalle_image(ctx: Context, msg: Message, api_key: &str, prompt: &str) -> String {

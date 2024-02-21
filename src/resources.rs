@@ -17,7 +17,7 @@ lazy_static! {
 
 pub const NUMBER_OF_PROGRESS_BARS: u64 = 49;
 
-pub const HELP_MESSAGE: &str = "💅🏻 **Woman Commands** ☕\n\
+pub const HELP_MESSAGE: &str = "💅🏻 **Amelia Commands** ☕\n\
 ```markdown\n\
 1. !<url>               -- Add a YouTube video to the queue\n\
 2. !play <query>        -- Plays the first YT search result\n\
@@ -50,6 +50,11 @@ pub const AUDIO_OPTIONS: [&str; 9] = [
     "pcm_f32le",
     "-",
 ];
+
+pub const MODEL: &str = "wizard-vicuna-uncensored:30b";
+
+pub const DEFAULT_SYSTEM_MOCK: &str = r#"
+    "#;
 
 #[derive(Debug, Clone)]
 pub struct Node {

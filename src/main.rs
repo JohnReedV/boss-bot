@@ -13,7 +13,7 @@ use resources::*;
 pub mod utils;
 use utils::*;
 pub mod systems;
-use systems::{chat_gpt, dalle_image, loop_song, manage_queue, say_queue, skip_all_enabled};
+use systems::{ollama, dalle_image, loop_song, manage_queue, say_queue, skip_all_enabled};
 
 #[tokio::main]
 async fn main() {
@@ -102,8 +102,6 @@ impl EventHandler for Handler {
 
         } else if message.starts_with("!") {
 
-            let api_key: String = env::var("OPENAI_KEY").expect("Expected OPENAI_KEY to be set");
-
             let prompt = if let Some(attachment) = msg.attachments.first() {
                 if attachment.filename.ends_with(".txt") {
                     attachment.download().await
@@ -116,7 +114,7 @@ impl EventHandler for Handler {
                 msg.content.split_at(2).1.to_string()
             };
             
-            let response: String = chat_gpt(&api_key, &prompt).await;
+            let response: String = ollama(prompt).await;
 
             send_large_message(&ctx, msg.channel_id, &response)
                 .await
