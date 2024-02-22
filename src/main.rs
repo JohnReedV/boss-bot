@@ -3,17 +3,20 @@ use serenity::{
     async_trait,
     client::{Client, EventHandler},
     framework::StandardFramework,
-    model::{channel::Message, gateway::GatewayIntents},
+    model::{channel::Message, gateway::GatewayIntents, prelude::AttachmentType},
     prelude::Context,
 };
 use songbird::{SerenityInit, Songbird};
-use std::{env, sync::Arc};
+use std::{env, sync::Arc, time::Duration};
+use tokio::time::sleep;
 pub mod resources;
 use resources::*;
 pub mod utils;
 use utils::*;
 pub mod systems;
-use systems::{ollama, dalle_image, loop_song, manage_queue, say_queue, skip_all_enabled};
+use systems::{
+    create_image, get_image_path, loop_song, manage_queue, ollama, say_queue, skip_all_enabled,
+};
 
 #[tokio::main]
 async fn main() {
@@ -90,21 +93,30 @@ impl EventHandler for Handler {
 
             manage_queue(url.as_str(), msg.clone(), guild_id, &ctx, manager, self).await;
         } else if message.starts_with("! image") || message.starts_with("!image") {
-            let api_key: String = env::var("OPENAI_KEY").expect("Expected OPENAI_KEY to be set");
             let query = message.split_at(5).1;
             let prompt: String = query.to_string();
 
-            let msg_clone = msg.clone();
-            let ctx_clone = ctx.clone();
+            let img_name: u64 = create_image(prompt).await.unwrap();
+            sleep(Duration::from_secs(3)).await;
+            let path = get_image_path(img_name.to_string()).await.unwrap();
+            let file = AttachmentType::Path(std::path::Path::new(&path));
 
-            let img_url: String = dalle_image(ctx_clone, msg_clone, &api_key, &prompt).await;
-            msg.reply(&ctx, img_url).await.unwrap();
-
+            if let Err(why) = msg
+                .channel_id
+                .send_message(&ctx.http, |m| {
+                    m.add_file(file);
+                    m
+                })
+                .await
+            {
+                println!("Error sending message: {:?}", why);
+            }
         } else if message.starts_with("!") {
-
             let prompt = if let Some(attachment) = msg.attachments.first() {
                 if attachment.filename.ends_with(".txt") {
-                    attachment.download().await
+                    attachment
+                        .download()
+                        .await
                         .map(|content| String::from_utf8_lossy(&content).into())
                         .unwrap_or_default()
                 } else {
@@ -113,7 +125,7 @@ impl EventHandler for Handler {
             } else {
                 msg.content.split_at(2).1.to_string()
             };
-            
+
             let response: String = ollama(prompt).await;
 
             send_large_message(&ctx, msg.channel_id, &response)
