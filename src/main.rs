@@ -8,14 +8,16 @@ use serenity::{
 };
 use songbird::{SerenityInit, Songbird};
 use std::{env, sync::Arc, time::Duration};
-use tokio::time::sleep;
+use tokio::{fs, time::sleep};
 pub mod resources;
 use resources::*;
 pub mod utils;
 use utils::*;
 pub mod systems;
+use serde_json::Value;
 use systems::{
-    create_image, get_image_path, loop_song, manage_queue, ollama, say_queue, skip_all_enabled,
+    chat_gpt, create_comfy_image, dalle_image, get_image_path, loop_song, manage_queue, ollama_llm,
+    say_queue, skip_all_enabled,
 };
 
 #[tokio::main]
@@ -96,20 +98,44 @@ impl EventHandler for Handler {
             let query = message.split_at(5).1;
             let prompt: String = query.to_string();
 
-            let img_name: u64 = create_image(prompt).await.unwrap();
-            sleep(Duration::from_secs(3)).await;
-            let path = get_image_path(img_name.to_string()).await.unwrap();
-            let file = AttachmentType::Path(std::path::Path::new(&path));
+            let config_str = fs::read_to_string("./config.json").await.unwrap();
+            let mut config_json: Value = serde_json::from_str(&config_str).unwrap();
 
-            if let Err(why) = msg
-                .channel_id
-                .send_message(&ctx.http, |m| {
-                    m.add_file(file);
-                    m
-                })
-                .await
-            {
-                println!("Error sending message: {:?}", why);
+            if let Some(node) = config_json.get_mut("image") {
+                if let (Some(dalle), Some(comfyui)) = (node.get("dalle"), node.get("comfyui")) {
+                    let dalle_bool = dalle.as_bool().unwrap_or(false);
+                    let comfyui_bool = comfyui.as_bool().unwrap_or(false);
+
+                    if dalle_bool && !comfyui_bool {
+                        let api_key: String =
+                            env::var("OPENAI_KEY").expect("Expected OPENAI_KEY to be set");
+                        let msg_clone = msg.clone();
+                        let ctx_clone = ctx.clone();
+                        let img_url: String =
+                            dalle_image(ctx_clone, msg_clone, &api_key, &prompt).await;
+                        msg.reply(&ctx, img_url).await.unwrap();
+                    } else if !dalle_bool && comfyui_bool {
+                        let img_name: u64 = create_comfy_image(prompt).await.unwrap();
+                        sleep(Duration::from_secs(5)).await;
+                        let path = get_image_path(img_name.to_string()).await.unwrap();
+                        let file = AttachmentType::Path(std::path::Path::new(&path));
+
+                        if let Err(why) = msg
+                            .channel_id
+                            .send_message(&ctx.http, |m| {
+                                m.add_file(file);
+                                m
+                            })
+                            .await
+                        {
+                            println!("Error sending message: {:?}", why);
+                        }
+                    } else {
+                        msg.reply(&ctx, "Only enable 1 image generator")
+                            .await
+                            .unwrap();
+                    }
+                }
             }
         } else if message.starts_with("!") {
             let prompt = if let Some(attachment) = msg.attachments.first() {
@@ -126,7 +152,26 @@ impl EventHandler for Handler {
                 msg.content.split_at(2).1.to_string()
             };
 
-            let response: String = ollama(prompt).await;
+            let config_str = fs::read_to_string("./config.json").await.unwrap();
+            let mut config_json: Value = serde_json::from_str(&config_str).unwrap();
+
+            let mut response: String = String::from("Only enable 1 LLM");
+
+            if let Some(node) = config_json.get_mut("llm") {
+                if let (Some(gpt), Some(ollama)) = (node.get("gpt"), node.get("ollama")) {
+                    let gpt_bool = gpt.as_bool().unwrap_or(false);
+                    let ollama_bool = ollama.as_bool().unwrap_or(false);
+
+                    if gpt_bool && !ollama_bool {
+                        let openai_api_key: String =
+                            env::var("OPENAI_KEY").expect("Expected OPENAI_KEY to be set");
+
+                        response = chat_gpt(&openai_api_key, &prompt).await;
+                    } else if !gpt_bool && ollama_bool {
+                        response = ollama_llm(prompt).await;
+                    }
+                }
+            }
 
             send_large_message(&ctx, msg.channel_id, &response)
                 .await

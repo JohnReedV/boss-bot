@@ -51,8 +51,6 @@ pub const AUDIO_OPTIONS: [&str; 9] = [
     "-",
 ];
 
-pub const MODEL: &str = "wizard-vicuna-uncensored:30b";
-
 pub const DEFAULT_SYSTEM_MOCK: &str = r#"
     "#;
 

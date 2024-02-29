@@ -6,7 +6,13 @@ Welcome to BossBot, your one-stop solution for music playback, queue management,
 
 ### 🤖 Chat with AI
 
-Feeling lonely? Start a conversation with our built-in AI model.
+Feeling lonely? Start a conversation with our built-in AI model. 
+Can be configured to work with OpenAI API or a local Ollama instance.
+
+### 🌅 AI Image generation.
+
+Generate an image of ANYTHING!
+Can be configured to work with OpenAI API or a local comfyUI instance.
 
 ### 🎵 Music Playback
 
@@ -32,4 +38,5 @@ Want to know what's coming up next? Type `!q` to see the current queue of songs.
 
 1. **Add the Bot**: Invite the bot to your server using the invitation link provided.
 2. **Join a Voice Channel**: Make sure you're in a voice channel so the bot knows where to play the music.
-3. **Start Using Commands**: Use any of the commands listed above to start interacting with the bot.
+3. **Configure**: Modify the config.json.example to your preferences and rename it to "config.json".
+4. **Start Using Commands**: Use any of the commands listed above to start interacting with the bot.

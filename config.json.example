@@ -1,0 +1,16 @@
+{
+    "llm": {
+        "gpt": false,
+        "ollama": true
+    },
+    "image": {
+        "dalle": false,
+        "comfyui": true
+    },
+    "models": {
+        "gpt": "gpt-4-0125-preview",
+        "ollama": "wizard-vicuna-uncensored:30b",
+        "dalle": "dall-e-3",
+        "comfy": "picxReal_10.safetensors"
+    }
+}
