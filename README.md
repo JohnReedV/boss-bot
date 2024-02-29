@@ -40,3 +40,13 @@ Want to know what's coming up next? Type `!q` to see the current queue of songs.
 2. **Join a Voice Channel**: Make sure you're in a voice channel so the bot knows where to play the music.
 3. **Configure**: Modify the config.json.example to your preferences and rename it to "config.json".
 4. **Start Using Commands**: Use any of the commands listed above to start interacting with the bot.
+
+## Dependencies
+
+### FFMPEG
+
+```sudo apt install ffmpeg```
+
+### YT-DLP
+
+[You can find the installation guide here](https://github.com/yt-dlp/yt-dlp)
