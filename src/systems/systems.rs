@@ -80,10 +80,10 @@ pub async fn chat_gpt(api_key: &str, prompt: &str) -> String {
                 None => return String::from("No GPT model specified"),
             }
         } else {
-            return String::from("Config error");
+            return String::from("Config error Code: 1");
         }
     } else {
-        return String::from("Config error!");
+        return String::from("Config error! Code: 2");
     }
 }
 
@@ -108,10 +108,10 @@ pub async fn ollama_llm(prompt: String) -> String {
                 None => return String::from("No image gen model specified"),
             }
         } else {
-            return String::from("Config error");
+            return String::from("Config error Code: 3");
         }
     } else {
-        return String::from("Config error!");
+        return String::from("Config error! Code: 4");
     }
 }
 
@@ -252,53 +252,57 @@ pub async fn dalle_image(ctx: Context, msg: Message, api_key: &str, prompt: &str
 
     let config_str = fs::read_to_string("./config.json").await.unwrap();
     let mut config_json: Value = serde_json::from_str(&config_str).unwrap();
-    if let Some(model_val) = config_json.get_mut("dalle") {
-        let model_string = model_val.as_str();
+    if let Some(model_json) = config_json.get_mut("models") {
+        if let Some(model_val) = model_json.get_mut("dalle") {
+            let model_string = model_val.as_str();
 
-        match model_string {
-            Some(model) => {
-                match client
-                    .post(url)
-                    .bearer_auth(api_key)
-                    .json(&serde_json::json!({
-                        "prompt": prompt,
-                        "model": model,
-                        "n": 1,
-                        "quality": "hd",
-                        "size": size
+            match model_string {
+                Some(model) => {
+                    match client
+                        .post(url)
+                        .bearer_auth(api_key)
+                        .json(&serde_json::json!({
+                            "prompt": prompt,
+                            "model": model,
+                            "n": 1,
+                            "quality": "hd",
+                            "size": size
 
-                    }))
-                    .send()
-                    .await
-                {
-                    Ok(response) => match response.text().await {
-                        Ok(response_body) => {
-                            bot_msg_2.delete(&ctx).await.unwrap();
-                            let json: Value = match serde_json::from_str(&response_body) {
-                                Ok(json) => json,
-                                Err(_) => return "Failed to parse JSON".to_string(),
-                            };
+                        }))
+                        .send()
+                        .await
+                    {
+                        Ok(response) => match response.text().await {
+                            Ok(response_body) => {
+                                bot_msg_2.delete(&ctx).await.unwrap();
+                                let json: Value = match serde_json::from_str(&response_body) {
+                                    Ok(json) => json,
+                                    Err(_) => return "Failed to parse JSON".to_string(),
+                                };
 
-                            return json["data"][0]["url"]
-                                .as_str()
-                                .unwrap_or(json["error"]["message"].to_string().as_str())
-                                .to_string();
-                        }
+                                return json["data"][0]["url"]
+                                    .as_str()
+                                    .unwrap_or(json["error"]["message"].to_string().as_str())
+                                    .to_string();
+                            }
+                            Err(_) => {
+                                bot_msg_2.delete(&ctx).await.unwrap();
+                                return "Failed to get response text from JSON".to_string();
+                            }
+                        },
                         Err(_) => {
                             bot_msg_2.delete(&ctx).await.unwrap();
-                            return "Failed to get response text from JSON".to_string();
+                            return "Failed to send request".to_string();
                         }
-                    },
-                    Err(_) => {
-                        bot_msg_2.delete(&ctx).await.unwrap();
-                        return "Failed to send request".to_string();
                     }
                 }
+                None => return String::from("no Dalle model specified"),
             }
-            None => return String::from("no Dalle model specified"),
+        } else {
+            return String::from("config error! Code: 5");
         }
     } else {
-        return String::from("config error");
+        return String::from("config error! Code: 6");
     }
 }
 
