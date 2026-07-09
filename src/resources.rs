@@ -1,7 +1,5 @@
 use crate::Regex;
 use lazy_static::lazy_static;
-use serenity::prelude::TypeMapKey;
-use songbird::Songbird;
 use std::{
     collections::VecDeque,
     sync::{atomic::AtomicBool, Arc},
@@ -70,11 +68,6 @@ impl Node {
             duration: duration,
         }
     }
-}
-pub struct SongbirdKey;
-
-impl TypeMapKey for SongbirdKey {
-    type Value = Arc<Songbird>;
 }
 
 pub struct Handler {

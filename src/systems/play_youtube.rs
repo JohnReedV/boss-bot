@@ -1,8 +1,11 @@
 use crate::resources::*;
 use crate::systems::tracker;
+use crate::utils::create_youtube_audio_input;
 use serenity::{model::channel::Message, prelude::Context};
-use songbird::input::YoutubeDl;
-use std::sync::{atomic::AtomicBool, Arc};
+use std::{
+    io,
+    sync::{atomic::AtomicBool, Arc},
+};
 
 pub async fn play_youtube(
     ctx: &Context,
@@ -17,19 +20,31 @@ pub async fn play_youtube(
         .expect("Songbird Voice client placed in at initialization.")
         .clone();
 
-    if let Some(handler_lock) = manager.get(guild_id) {
-        let mut handler = handler_lock.lock().await;
+    let handler_lock = manager.get(guild_id).ok_or_else(|| {
+        io::Error::new(
+            io::ErrorKind::NotConnected,
+            "not connected to a voice channel for playback",
+        )
+    })?;
 
+    let node = {
         let mut queue = VIDEO_QUEUE.lock().await;
-        if let Some(node) = queue.pop_front() {
-            let source = YoutubeDl::new(songbird_reqwest::Client::new(), node.url.clone());
-            handler.play_only_input(source.into());
+        queue.pop_front()
+    };
 
-            let ctx_clone = ctx.clone();
-            tokio::spawn(async move {
-                tracker(ctx_clone, skip, tracking_mutex, msg, node).await;
-            });
-        }
+    if let Some(node) = node {
+        let source = create_youtube_audio_input(&node.url)?;
+        let track_handle = {
+            let mut handler = handler_lock.lock().await;
+            handler.play_only_input(source.into())
+        };
+
+        track_handle.make_playable_async().await?;
+
+        let ctx_clone = ctx.clone();
+        tokio::spawn(async move {
+            tracker(ctx_clone, skip, tracking_mutex, msg, node).await;
+        });
     }
 
     Ok(())

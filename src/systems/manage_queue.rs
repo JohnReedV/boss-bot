@@ -42,7 +42,20 @@ pub async fn manage_queue(
                     Err(_) => {}
                 }
             }
-            let duration: Duration = get_video_duration(&url).await.unwrap();
+            let duration: Duration = match get_video_duration(url).await {
+                Ok(duration) => duration,
+                Err(why) => {
+                    println!("Error getting video duration: {:?}", why);
+                    let _ = msg
+                        .channel_id
+                        .say(
+                            &ctx.http,
+                            format!("Couldn't inspect that YouTube URL: {}", why),
+                        )
+                        .await;
+                    return;
+                }
+            };
 
             {
                 let mut queue = VIDEO_QUEUE.lock().await;
@@ -92,16 +105,27 @@ pub async fn manage_queue(
                                     let ctx_clone = ctx.clone();
                                     let msg_clone = msg.clone();
 
-                                    tokio::spawn(async move {
-                                        play_youtube(
-                                            &ctx_clone,
-                                            msg_clone.clone(),
-                                            skip_tracker_clone,
-                                            tracker_clone,
-                                        )
-                                        .await
-                                        .unwrap();
-                                    });
+                                    if let Err(why) = play_youtube(
+                                        &ctx_clone,
+                                        msg_clone.clone(),
+                                        skip_tracker_clone,
+                                        tracker_clone,
+                                    )
+                                    .await
+                                    {
+                                        println!("Error playing YouTube audio: {:?}", why);
+                                        let _ = msg
+                                            .channel_id
+                                            .say(
+                                                &ctx.http,
+                                                format!("Couldn't play that audio: {}", why),
+                                            )
+                                            .await;
+
+                                        let mut playing_lock = app.playing.lock().await;
+                                        *playing_lock = false;
+                                        continue;
+                                    }
 
                                     tokio::select! {
                                         _ = sleep(the_duration + Duration::from_secs(1)) => {

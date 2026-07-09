@@ -5,8 +5,8 @@ use serenity::{
     model::{channel::Message, gateway::GatewayIntents},
     prelude::Context,
 };
-use songbird::{SerenityInit, Songbird};
-use std::{env, sync::Arc};
+use songbird::SerenityInit;
+use std::env;
 pub mod resources;
 use resources::*;
 pub mod utils;
@@ -24,12 +24,6 @@ async fn main() {
         .register_songbird()
         .await
         .expect("Err creating client");
-
-    let songbird: Arc<Songbird> = Songbird::serenity();
-    {
-        let mut data = client.data.write().await;
-        data.insert::<SongbirdKey>(songbird.clone());
-    }
 
     client
         .start()
@@ -80,12 +74,31 @@ impl EventHandler for Handler {
             msg.channel_id.say(&ctx.http, HELP_MESSAGE).await.unwrap();
         } else if message.starts_with("! loop ") || message.starts_with("!loop ") {
             msg.delete(&ctx).await.unwrap();
-            loop_song(self, message, msg.clone(), &ctx).await.unwrap();
+            if let Err(why) = loop_song(self, message, msg.clone(), &ctx).await {
+                println!("Error looping song: {:?}", why);
+                let _ = msg
+                    .channel_id
+                    .say(&ctx.http, format!("Couldn't loop that song: {}", why))
+                    .await;
+            }
         } else if message.starts_with("! play ") || message.starts_with("!play ") {
-            let query = message.split_at(5).1;
-            let url = get_searched_url(query).await.unwrap();
+            let query = message
+                .strip_prefix("!play ")
+                .or_else(|| message.strip_prefix("! play "))
+                .unwrap_or_default()
+                .trim();
 
-            manage_queue(url.as_str(), msg.clone(), guild_id, &ctx, manager, self).await;
+            match get_searched_url(query).await {
+                Ok(url) => {
+                    manage_queue(url.as_str(), msg.clone(), guild_id, &ctx, manager, self).await
+                }
+                Err(why) => {
+                    println!("Error searching YouTube: {:?}", why);
+                    let _ = msg
+                        .reply(&ctx, format!("Couldn't search YouTube: {}", why))
+                        .await;
+                }
+            }
         } else if message.starts_with("! image") || message.starts_with("!image") {
             let api_key: String = env::var("OPENAI_KEY").expect("Expected OPENAI_KEY to be set");
             let query = message.split_at(5).1;

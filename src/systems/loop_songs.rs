@@ -3,7 +3,6 @@ use crate::systems::tracker;
 use crate::utils::*;
 use crate::Handler;
 use serenity::{model::channel::Message, prelude::Context};
-use songbird::input::YoutubeDl;
 use std::{sync::atomic::Ordering, time::Duration};
 use tokio::time::sleep;
 
@@ -62,7 +61,20 @@ pub async fn loop_song(
                 }
 
                 if let Some(handler_lock) = manager.get(guild_id) {
-                    let duration = get_video_duration(url).await.unwrap();
+                    let duration = match get_video_duration(url).await {
+                        Ok(duration) => duration,
+                        Err(why) => {
+                            println!("Error getting video duration: {:?}", why);
+                            let _ = msg
+                                .channel_id
+                                .say(
+                                    &ctx.http,
+                                    format!("Couldn't inspect that YouTube URL: {}", why),
+                                )
+                                .await;
+                            return Ok(());
+                        }
+                    };
                     msg.channel_id
                         .say(
                             &ctx.http,
@@ -78,8 +90,7 @@ pub async fn loop_song(
 
                     let mut iterations = 0;
                     loop {
-                        let source =
-                            YoutubeDl::new(songbird_reqwest::Client::new(), url.to_string());
+                        let source = create_youtube_audio_input(url)?;
 
                         let ctx_clone = ctx.clone();
                         let tracker_clone = app.tracking.clone();
@@ -87,9 +98,15 @@ pub async fn loop_song(
                         let msg_clone = msg.clone();
                         let node = Node::from(url.to_string(), duration);
 
-                        {
+                        let track_handle = {
                             let mut handler = handler_lock.lock().await;
-                            handler.play_only_input(source.into());
+                            handler.play_only_input(source.into())
+                        };
+
+                        if let Err(why) = track_handle.make_playable_async().await {
+                            let mut looping_lock = app.looping.lock().await;
+                            *looping_lock = false;
+                            return Err(Box::new(why));
                         }
 
                         tokio::spawn(async move {
