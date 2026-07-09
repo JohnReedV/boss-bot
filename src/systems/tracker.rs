@@ -1,6 +1,10 @@
 use crate::resources::*;
 use crate::utils::*;
-use serenity::{model::channel::Message, prelude::Context};
+use serenity::{
+    builder::{CreateEmbed, EditMessage},
+    model::channel::Message,
+    prelude::Context,
+};
 use std::{
     cmp::max,
     sync::{
@@ -65,22 +69,18 @@ pub async fn tracker(
 
             let combined_field = format!("{}\n{}{}", duration_str, progress_bar, empty_space);
 
-            created_message
-                .edit(&ctx.http, |m| {
-                    if first_update {
-                        m.content(" ");
-                        first_update = false;
-                    }
-                    m.embed(|e| {
-                        e.title("Now Playing").description(&content).field(
-                            "Progress",
-                            &combined_field,
-                            false,
-                        )
-                    })
-                })
-                .await
-                .unwrap();
+            let embed = CreateEmbed::new()
+                .title("Now Playing")
+                .description(content.clone())
+                .field("Progress", combined_field.clone(), false);
+            let mut edit = EditMessage::new().embed(embed);
+
+            if first_update {
+                edit = edit.content(" ");
+                first_update = false;
+            }
+
+            created_message.edit(&ctx.http, edit).await.unwrap();
 
             next_tick += Duration::from_secs(count);
         }

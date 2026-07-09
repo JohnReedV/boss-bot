@@ -128,7 +128,7 @@ pub async fn dalle_image(ctx: Context, msg: Message, api_key: &str, prompt: &str
                 return json["data"][0]["url"]
                     .as_str()
                     .unwrap_or(json["error"]["message"].to_string().as_str())
-                    .to_string()
+                    .to_string();
             }
             Err(_) => {
                 bot_msg_2.delete(&ctx).await.unwrap();

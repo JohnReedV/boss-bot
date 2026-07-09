@@ -3,9 +3,9 @@ use crate::systems::tracker;
 use crate::utils::*;
 use crate::Handler;
 use serenity::{model::channel::Message, prelude::Context};
-use songbird::input::ffmpeg_optioned;
+use songbird::input::YoutubeDl;
 use std::{sync::atomic::Ordering, time::Duration};
-use tokio::{process::Command as TokioCommand, time::sleep};
+use tokio::time::sleep;
 
 pub async fn loop_song(
     app: &Handler,
@@ -42,20 +42,24 @@ pub async fn loop_song(
                     Err(_) => usize::MAX,
                 };
 
-                let guild = msg.guild(&ctx.cache).unwrap();
-                let guild_id = guild.id;
-
-                let channel_id = guild
-                    .voice_states
-                    .get(&msg.author.id)
-                    .and_then(|voice_state| voice_state.channel_id)
-                    .unwrap();
+                let guild_id = msg.guild_id.unwrap();
+                let channel_id = {
+                    let guild = msg.guild(&ctx.cache).unwrap();
+                    guild
+                        .voice_states
+                        .get(&msg.author.id)
+                        .and_then(|voice_state| voice_state.channel_id)
+                        .unwrap()
+                };
 
                 let manager = songbird::get(ctx)
                     .await
                     .expect("Songbird Voice client placed in at initialization.")
                     .clone();
-                let (_handler_lock, _success) = manager.join(guild_id, channel_id).await;
+                if let Err(why) = manager.join(guild_id, channel_id).await {
+                    println!("Failed to join voice: {:?}", why);
+                    return Ok(());
+                }
 
                 if let Some(handler_lock) = manager.get(guild_id) {
                     let duration = get_video_duration(url).await.unwrap();
@@ -74,19 +78,8 @@ pub async fn loop_song(
 
                     let mut iterations = 0;
                     loop {
-                        let output = TokioCommand::new("yt-dlp")
-                            .arg("-f")
-                            .arg("bestaudio")
-                            .arg("-g")
-                            .arg(&url)
-                            .output()
-                            .await?;
-                        let audio_url = String::from_utf8(output.stdout)?.trim().to_string();
-
                         let source =
-                            ffmpeg_optioned(audio_url, &FFMPEG_OPTIONS, &AUDIO_OPTIONS).await?;
-
-                        let (track, _track_handle) = songbird::create_player(source);
+                            YoutubeDl::new(songbird_reqwest::Client::new(), url.to_string());
 
                         let ctx_clone = ctx.clone();
                         let tracker_clone = app.tracking.clone();
@@ -96,7 +89,7 @@ pub async fn loop_song(
 
                         {
                             let mut handler = handler_lock.lock().await;
-                            handler.play_only(track);
+                            handler.play_only_input(source.into());
                         }
 
                         tokio::spawn(async move {

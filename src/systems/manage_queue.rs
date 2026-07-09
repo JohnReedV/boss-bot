@@ -49,16 +49,17 @@ pub async fn manage_queue(
                 queue.push_back(Node::from(url.to_string(), duration));
             }
 
-            let guild = ctx.cache.guild(guild_id).unwrap();
-            let channel_id = guild
-                .voice_states
-                .get(&msg.author.id)
-                .and_then(|voice_state| voice_state.channel_id);
+            let channel_id = {
+                let guild = ctx.cache.guild(guild_id).unwrap();
+                guild
+                    .voice_states
+                    .get(&msg.author.id)
+                    .and_then(|voice_state| voice_state.channel_id)
+            };
 
             match channel_id {
                 Some(channel) => {
-                    let (_handler_lock, success) = manager.join(guild_id, channel).await;
-                    if success.is_ok() {
+                    if manager.join(guild_id, channel).await.is_ok() {
                         loop {
                             let should_continue: bool;
                             let the_duration: Duration;

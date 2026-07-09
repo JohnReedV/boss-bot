@@ -4,15 +4,16 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
-serenity = "0.11.6"
-tokio = { version = "1", features = ["full"] }
+serenity = "0.12.5"
+tokio = { version = "1.52.3", features = ["full"] }
 dotenv = "0.15.0"
-openai-rust = "0.5.1"
-songbird = "0.3.2"
-regex = "1.9.5"
-lazy_static = "1.4.0"
-serde_json = "1.0.108"
-reqwest = "0.11.22"
+openai-rust = "1.5.2"
+songbird = "0.6.0"
+songbird_reqwest = { package = "reqwest", version = "0.12.28", default-features = false, features = ["rustls-tls", "stream"] }
+regex = "1.13.0"
+lazy_static = "1.5.0"
+serde_json = "1.0.150"
+reqwest = { version = "0.13.4", features = ["json"] }
 
 [profile.release]
 opt-level = 3
