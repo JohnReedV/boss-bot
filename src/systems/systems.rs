@@ -14,6 +14,7 @@ use serenity::{
 use songbird::Songbird;
 use std::{
     collections::VecDeque,
+    env,
     sync::{atomic::Ordering, Arc},
 };
 use tokio::time::{sleep, Duration};
@@ -45,16 +46,23 @@ pub async fn skip_all_enabled(app: &Handler, guild_id: GuildId, manager: Arc<Son
 
 pub async fn chat_gpt(api_key: &str, prompt: &str) -> String {
     let client: OpenAiClient = OpenAiClient::new(api_key);
+    let model = env::var("OPENAI_MODEL").unwrap_or_else(|_| "gpt-5.6-sol".to_owned());
     let args: ChatArguments = ChatArguments::new(
-        "gpt-4-0125-preview",
+        &model,
         vec![OpenAiMessage {
             role: "user".to_owned(),
             content: prompt.to_owned(),
         }],
     );
 
-    let res = client.create_chat(args).await.unwrap();
-    return format!("{}", res.choices[0].message.content.clone());
+    match client.create_chat(args).await {
+        Ok(res) => res
+            .choices
+            .first()
+            .map(|choice| choice.message.content.clone())
+            .unwrap_or_else(|| "OpenAI returned no response choices.".to_owned()),
+        Err(error) => format!("OpenAI request failed: {error:?}"),
+    }
 }
 
 pub async fn dalle_image(ctx: Context, msg: Message, api_key: &str, prompt: &str) -> String {
