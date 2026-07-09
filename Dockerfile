@@ -3,7 +3,7 @@ FROM rust:latest AS builder
 
 # Install system dependencies required for the release build
 RUN apt-get update && \
-    apt-get install -y --no-install-recommends cmake ca-certificates && \
+    apt-get install -y --no-install-recommends cmake ca-certificates pkg-config libssl-dev && \
     rm -rf /var/lib/apt/lists/*
 
 # Set the working directory
@@ -25,7 +25,7 @@ ENV DEBIAN_FRONTEND=noninteractive
 
 # Install runtime dependencies for the yt-dlp -> ffmpeg -> Songbird audio pipeline
 RUN apt-get update && \
-    apt-get install -y --no-install-recommends ca-certificates tzdata wget python3 ffmpeg && \
+    apt-get install -y --no-install-recommends ca-certificates tzdata wget python3 ffmpeg openssl && \
     rm -rf /var/lib/apt/lists/*
 
 # Download and verify yt-dlp alongside ffmpeg so audio failures surface during image build

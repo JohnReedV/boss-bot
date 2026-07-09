@@ -12,7 +12,7 @@ use resources::*;
 pub mod utils;
 use utils::*;
 pub mod systems;
-use systems::{chat_gpt, dalle_image, loop_song, manage_queue, say_queue, skip_all_enabled};
+use systems::{chat_gpt, generate_image, loop_song, manage_queue, say_queue, skip_all_enabled};
 
 #[tokio::main]
 async fn main() {
@@ -107,8 +107,9 @@ impl EventHandler for Handler {
             let msg_clone = msg.clone();
             let ctx_clone = ctx.clone();
 
-            let img_url: String = dalle_image(ctx_clone, msg_clone, &api_key, &prompt).await;
-            msg.reply(&ctx, img_url).await.unwrap();
+            if let Err(why) = generate_image(ctx_clone, msg_clone, &api_key, &prompt).await {
+                let _ = msg.reply(&ctx, why).await;
+            }
         } else if message.starts_with("!") {
             let api_key: String = env::var("OPENAI_KEY").expect("Expected OPENAI_KEY to be set");
 

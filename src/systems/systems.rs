@@ -1,10 +1,12 @@
 use crate::resources::*;
 use crate::utils::*;
 use crate::Handler;
+use base64::{engine::general_purpose, Engine as _};
 use openai_rust::{chat::ChatArguments, chat::Message as OpenAiMessage, Client as OpenAiClient};
 use reqwest::Client;
 use serde_json::Value;
 use serenity::{
+    builder::{CreateAttachment, CreateMessage},
     model::{
         channel::Message,
         prelude::{GuildId, ReactionType},
@@ -65,21 +67,29 @@ pub async fn chat_gpt(api_key: &str, prompt: &str) -> String {
     }
 }
 
-pub async fn dalle_image(ctx: Context, msg: Message, api_key: &str, prompt: &str) -> String {
-    let client = Client::new();
+pub async fn generate_image(
+    ctx: Context,
+    msg: Message,
+    api_key: &str,
+    prompt: &str,
+) -> Result<(), String> {
+    let client = Client::builder()
+        .build()
+        .map_err(|error| format!("Failed to build image HTTP client: {error}"))?;
+    let model = env::var("OPENAI_IMAGE_MODEL").unwrap_or_else(|_| "gpt-image-2".to_owned());
     let url = "https://api.openai.com/v1/images/generations";
 
     let bot_msg = msg
         .reply(&ctx, "Select a size")
         .await
-        .expect("Expected prompt message");
+        .map_err(|error| format!("Failed to send size prompt: {error}"))?;
 
     let sizes = vec!["🟦", "↔", "↕️"];
     for emoji in &sizes {
         bot_msg
             .react(&ctx.http, ReactionType::Unicode(emoji.to_string()))
             .await
-            .expect("Expected to react");
+            .map_err(|error| format!("Failed to add size reactions: {error}"))?;
     }
 
     let mut selected_size = None;
@@ -93,8 +103,8 @@ pub async fn dalle_image(ctx: Context, msg: Message, api_key: &str, prompt: &str
                 if users.iter().any(|user| user.id == msg.author.id) {
                     selected_size = match *emoji {
                         "🟦" => Some("1024x1024"),
-                        "↔" => Some("1792x1024"),
-                        "↕️" => Some("1024x1792"),
+                        "↔" => Some("1536x1024"),
+                        "↕️" => Some("1024x1536"),
                         _ => None,
                     };
                     break;
@@ -106,48 +116,69 @@ pub async fn dalle_image(ctx: Context, msg: Message, api_key: &str, prompt: &str
         }
     }
 
-    bot_msg.delete(&ctx).await.expect("expected to delete");
+    let _ = bot_msg.delete(&ctx).await;
     let size = selected_size.unwrap().to_string();
 
-    let bot_msg_2 = msg.reply(&ctx, "Generating...").await.unwrap();
+    let bot_msg_2 = msg
+        .reply(&ctx, "Generating...")
+        .await
+        .map_err(|error| format!("Failed to send generation status: {error}"))?;
 
-    match client
+    let response = client
         .post(url)
         .bearer_auth(api_key)
         .json(&serde_json::json!({
             "prompt": prompt,
-            "model": "dall-e-3",
+            "model": model,
             "n": 1,
-            "quality": "hd",
+            "quality": "high",
             "size": size
-
         }))
         .send()
         .await
-    {
-        Ok(response) => match response.text().await {
-            Ok(response_body) => {
-                bot_msg_2.delete(&ctx).await.unwrap();
-                let json: Value = match serde_json::from_str(&response_body) {
-                    Ok(json) => json,
-                    Err(_) => return "Failed to parse JSON".to_string(),
-                };
+        .map_err(|error| format!("Failed to send image request: {error}"))?;
 
-                return json["data"][0]["url"]
-                    .as_str()
-                    .unwrap_or(json["error"]["message"].to_string().as_str())
-                    .to_string();
-            }
-            Err(_) => {
-                bot_msg_2.delete(&ctx).await.unwrap();
-                return "Failed to get response text from JSON".to_string();
-            }
-        },
-        Err(_) => {
-            bot_msg_2.delete(&ctx).await.unwrap();
-            return "Failed to send request".to_string();
-        }
+    let status = response.status();
+    let response_body = response
+        .text()
+        .await
+        .map_err(|error| format!("Failed to read image response: {error}"))?;
+    let _ = bot_msg_2.delete(&ctx).await;
+
+    let json: Value = serde_json::from_str(&response_body)
+        .map_err(|error| format!("Failed to parse image response JSON: {error}"))?;
+
+    if !status.is_success() {
+        let message = json["error"]["message"]
+            .as_str()
+            .unwrap_or("Image generation failed");
+        return Err(message.to_owned());
     }
+
+    if let Some(image_base64) = json["data"][0]["b64_json"].as_str() {
+        let image_bytes = general_purpose::STANDARD
+            .decode(image_base64)
+            .map_err(|error| format!("Failed to decode generated image: {error}"))?;
+        let attachment = CreateAttachment::bytes(image_bytes, "boss-bot-image.png");
+        let message = CreateMessage::new()
+            .content(format!("Generated with `{}`", model))
+            .add_file(attachment);
+
+        msg.channel_id
+            .send_message(&ctx.http, message)
+            .await
+            .map_err(|error| format!("Failed to upload generated image: {error}"))?;
+        return Ok(());
+    }
+
+    if let Some(image_url) = json["data"][0]["url"].as_str() {
+        msg.reply(&ctx, image_url)
+            .await
+            .map_err(|error| format!("Failed to send generated image URL: {error}"))?;
+        return Ok(());
+    }
+
+    Err("Image response did not include image data.".to_owned())
 }
 
 pub async fn say_queue(msg: Message, ctx: &Context, queue: VecDeque<Node>) {
