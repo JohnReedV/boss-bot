@@ -39,9 +39,19 @@ impl EventHandler for Handler {
         if msg.author.bot {
             return;
         }
+
+        if !message.starts_with("!") {
+            return;
+        }
+
         println!("Got message: {}", message);
 
-        let guild_id = msg.guild_id.unwrap();
+        let Some(guild_id) = msg.guild_id else {
+            let _ = msg
+                .reply(&ctx, "I only handle commands inside a server.")
+                .await;
+            return;
+        };
         let manager = songbird::get(&ctx)
             .await
             .expect("Songbird Voice client placed in at initialization.")

@@ -13,7 +13,7 @@ use std::{
     },
     time::Duration,
 };
-use tokio::time::Instant;
+use tokio::time::{sleep, Instant};
 
 pub async fn tracker(
     ctx: Context,
@@ -88,6 +88,10 @@ pub async fn tracker(
         if skip.load(Ordering::SeqCst) {
             skip.store(false, Ordering::SeqCst);
             break;
+        }
+
+        if current_time < duration.as_secs() {
+            sleep(Duration::from_millis(100)).await;
         }
     }
     {
