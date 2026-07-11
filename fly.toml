@@ -1,0 +1,19 @@
+app = "bossbot"
+primary_region = "sjc"
+kill_signal = "SIGINT"
+kill_timeout = 30
+
+[build]
+  dockerfile = "Dockerfile"
+
+[processes]
+  app = "./boss-bot"
+
+[[vm]]
+  cpu_kind = "shared"
+  cpus = 1
+  memory = "1gb"
+
+[[restart]]
+  policy = "always"
+  processes = ["app"]
