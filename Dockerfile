@@ -37,10 +37,7 @@ RUN wget -O /usr/local/bin/yt-dlp https://github.com/yt-dlp/yt-dlp/releases/late
 # Copy the binary to /usr/local/bin
 COPY --from=builder /usr/src/boss-bot/target/release/boss-bot /usr/local/bin
 
-# Copy the .env file to the current working directory of the binary
-COPY .env /usr/local/bin/.env
-
-# Set working directory to where the .env and binary are located
+# Set working directory to where the binary is located. Secrets are provided at runtime.
 WORKDIR /usr/local/bin
 
 # Run the bot

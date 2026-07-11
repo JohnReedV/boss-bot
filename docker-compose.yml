@@ -5,5 +5,7 @@ services:
       dockerfile: Dockerfile
     image: spiigot/boss-bot:latest
     container_name: boss-bot-instance
+    env_file:
+      - .env
     environment:
       DEBIAN_FRONTEND: noninteractive

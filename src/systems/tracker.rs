@@ -27,6 +27,24 @@ pub async fn tracker(
         *tracking = true;
     }
 
+    let result = run_tracker(ctx, skip, msg, node).await;
+
+    {
+        let mut tracking = tracking_mutex.lock().await;
+        *tracking = false;
+    }
+
+    if let Err(why) = result {
+        println!("Tracker error: {:?}", why);
+    }
+}
+
+async fn run_tracker(
+    ctx: Context,
+    skip: Arc<AtomicBool>,
+    msg: Message,
+    node: Node,
+) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let url = node.url;
     let duration = node.duration;
     let count = max(1, duration.as_secs() / NUMBER_OF_PROGRESS_BARS);
@@ -36,16 +54,17 @@ pub async fn tracker(
     let start_time = Instant::now();
     let mut next_tick = start_time + Duration::from_secs(count);
 
-    let video_title = get_video_title(&url).await.unwrap();
-    let clean_video_title = video_title.replace("\n", "");
+    let clean_video_title = match get_video_title(&url).await {
+        Ok(title) => title.replace(['\n', '\r'], " "),
+        Err(why) => {
+            println!("Error getting video title: {:?}", why);
+            url.clone()
+        }
+    };
     let new_content = format!("Playing: ```{}```", clean_video_title);
-    let mut created_message = msg
-        .channel_id
-        .say(&ctx.http, new_content.clone())
-        .await
-        .unwrap();
+    let mut created_message = msg.channel_id.say(&ctx.http, new_content).await?;
 
-    let content = created_message.content.replace("Playing:", "");
+    let content = format!("```{}```", clean_video_title);
 
     while current_time < duration.as_secs() {
         let now = Instant::now();
@@ -59,20 +78,20 @@ pub async fn tracker(
                 duration.as_secs() % 60
             );
 
-            let progress: usize = ((current_time as f64 / duration.as_secs() as f64)
+            let progress = ((current_time as f64 / duration.as_secs() as f64)
                 * NUMBER_OF_PROGRESS_BARS as f64)
                 .floor() as usize;
-            let progress_bar: String = std::iter::repeat("█").take(progress).collect();
-            let empty_space: String = std::iter::repeat("░")
-                .take(49 - progress as usize)
-                .collect();
+            let progress = progress.min(NUMBER_OF_PROGRESS_BARS as usize);
+            let progress_bar = "█".repeat(progress);
+            let empty_space =
+                "░".repeat((NUMBER_OF_PROGRESS_BARS as usize).saturating_sub(progress));
 
             let combined_field = format!("{}\n{}{}", duration_str, progress_bar, empty_space);
 
             let embed = CreateEmbed::new()
                 .title("Now Playing")
                 .description(content.clone())
-                .field("Progress", combined_field.clone(), false);
+                .field("Progress", combined_field, false);
             let mut edit = EditMessage::new().embed(embed);
 
             if first_update {
@@ -80,7 +99,10 @@ pub async fn tracker(
                 first_update = false;
             }
 
-            created_message.edit(&ctx.http, edit).await.unwrap();
+            if let Err(why) = created_message.edit(&ctx.http, edit).await {
+                println!("Error editing tracker message: {:?}", why);
+                break;
+            }
 
             next_tick += Duration::from_secs(count);
         }
@@ -94,9 +116,10 @@ pub async fn tracker(
             sleep(Duration::from_millis(100)).await;
         }
     }
-    {
-        let mut tracking = tracking_mutex.lock().await;
-        *tracking = false;
+
+    if let Err(why) = created_message.delete(&ctx.http).await {
+        println!("Error deleting tracker message: {:?}", why);
     }
-    created_message.delete(&ctx.http).await.unwrap();
+
+    Ok(())
 }

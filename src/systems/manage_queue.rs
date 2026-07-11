@@ -23,22 +23,21 @@ pub async fn manage_queue(
 ) {
     match extract_youtube_url(message) {
         Ok(url) => {
-            if let Err(why) = msg.delete(&ctx).await {
+            if let Err(why) = msg.delete(ctx).await {
                 println!("Error deleting message: {:?}", why);
             }
 
-            if let Ok(looping) = app.looping.try_lock() {
-                if *looping {
-                    let _ = msg.channel_id.say(&ctx.http, "You loopin rn").await;
-                    return;
-                }
+            let is_looping = *app.looping.lock().await;
+            if is_looping {
+                let _ = msg.channel_id.say(&ctx.http, "You loopin rn").await;
+                return;
             }
 
             let channel_id = {
                 let Some(guild) = ctx.cache.guild(guild_id) else {
                     let _ = msg
                         .reply(
-                            &ctx,
+                            ctx,
                             "I couldn't find this server in cache. Try again in a moment.",
                         )
                         .await;
@@ -52,21 +51,9 @@ pub async fn manage_queue(
             };
 
             let Some(channel) = channel_id else {
-                let _ = msg.reply(&ctx, "Join voice noob").await;
+                let _ = msg.reply(ctx, "Join voice noob").await;
                 return;
             };
-
-            if let Err(why) = manager.join(guild_id, channel).await {
-                println!("Failed to join voice: {:?}", why);
-                let _ = msg
-                    .channel_id
-                    .say(
-                        &ctx.http,
-                        format!("Couldn't join your voice channel: {}", why),
-                    )
-                    .await;
-                return;
-            }
 
             let duration: Duration = match get_video_duration(url).await {
                 Ok(duration) => duration,
@@ -83,12 +70,9 @@ pub async fn manage_queue(
                 }
             };
 
-            {
+            let should_drive_queue = {
                 let mut queue = VIDEO_QUEUE.lock().await;
                 queue.push_back(Node::from(url.to_string(), duration));
-            }
-
-            let should_drive_queue = {
                 let mut playing = app.playing.lock().await;
                 if *playing {
                     false
@@ -102,6 +86,26 @@ pub async fn manage_queue(
                 return;
             }
 
+            if let Err(why) = manager.join(guild_id, channel).await {
+                println!("Failed to join voice: {:?}", why);
+                {
+                    let mut queue = VIDEO_QUEUE.lock().await;
+                    queue.clear();
+                }
+                {
+                    let mut playing = app.playing.lock().await;
+                    *playing = false;
+                }
+                let _ = msg
+                    .channel_id
+                    .say(
+                        &ctx.http,
+                        format!("Couldn't join your voice channel: {}", why),
+                    )
+                    .await;
+                return;
+            }
+
             loop {
                 let duration = {
                     let queue = VIDEO_QUEUE.lock().await;
@@ -109,7 +113,6 @@ pub async fn manage_queue(
                 };
 
                 let Some(the_duration) = duration else {
-                    let mut playing = app.playing.lock().await;
                     let queue_has_item = {
                         let queue = VIDEO_QUEUE.lock().await;
                         queue.front().is_some()
@@ -119,6 +122,7 @@ pub async fn manage_queue(
                         continue;
                     }
 
+                    let mut playing = app.playing.lock().await;
                     *playing = false;
                     break;
                 };
@@ -155,15 +159,26 @@ pub async fn manage_queue(
                             }
                         }
                     } => {
-                        if *app.tracking.lock().await {
+                        let is_tracking = *app.tracking.lock().await;
+                        if is_tracking {
                             app.skip_tracker.store(true, Ordering::SeqCst);
+                            wait_for_tracker_to_stop(app).await;
                         }
                     }
                 }
             }
         }
         Err(_) => {
-            let _ = msg.reply(&ctx, "Bad URL").await;
+            let _ = msg.reply(ctx, "Bad URL").await;
         }
+    }
+}
+
+async fn wait_for_tracker_to_stop(app: &Handler) {
+    for _ in 0..100 {
+        if !*app.tracking.lock().await {
+            return;
+        }
+        sleep(Duration::from_millis(50)).await;
     }
 }

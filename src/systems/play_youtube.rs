@@ -13,7 +13,12 @@ pub async fn play_youtube(
     skip: Arc<AtomicBool>,
     tracking_mutex: Arc<tokio::sync::Mutex<bool>>,
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-    let guild_id = msg.guild_id.unwrap();
+    let guild_id = msg.guild_id.ok_or_else(|| {
+        io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "playback can only run inside a server",
+        )
+    })?;
 
     let manager = songbird::get(ctx)
         .await
@@ -36,7 +41,7 @@ pub async fn play_youtube(
         let source = create_youtube_audio_input(&node.url)?;
         let track_handle = {
             let mut handler = handler_lock.lock().await;
-            handler.play_only_input(source.into())
+            handler.play_only_input(source)
         };
 
         track_handle.make_playable_async().await?;

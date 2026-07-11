@@ -1,4 +1,3 @@
-use crate::Regex;
 use lazy_static::lazy_static;
 use std::{
     collections::VecDeque,
@@ -10,7 +9,6 @@ use tokio::sync::Mutex;
 lazy_static! {
     #[derive(Debug, Clone, Copy)]
     pub static ref VIDEO_QUEUE: Mutex<VecDeque<Node>> = Mutex::new(VecDeque::new());
-    pub static ref RE: Regex = Regex::new(r"-?\d+").unwrap();
 }
 
 pub const NUMBER_OF_PROGRESS_BARS: u64 = 49;
@@ -24,7 +22,7 @@ pub const HELP_MESSAGE: &str = "💅🏻 **Woman Commands** ☕\n\
 5. !skip                -- Skip the currently playing song\n\
 6. !leave               -- Leave the voice channel and clear the queue\n\
 7. !image               -- Everything after \"!image\" is an image prompt\n\
-8. !                    -- Everything proceeding from \"!\" is a GPT prompt\n\
+8. !                    -- Everything after \"!\" is a GPT prompt\n\
 9. !help                -- Displays this page\n\
 ```";
 
@@ -62,11 +60,15 @@ impl Node {
             duration: Duration::new(0, 0),
         }
     }
+
     pub fn from(url: String, duration: Duration) -> Self {
-        Node {
-            url: url,
-            duration: duration,
-        }
+        Node { url, duration }
+    }
+}
+
+impl Default for Node {
+    fn default() -> Self {
+        Self::new()
     }
 }
 

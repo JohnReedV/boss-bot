@@ -19,7 +19,7 @@ use std::{
     env,
     sync::{atomic::Ordering, Arc},
 };
-use tokio::time::{sleep, Duration};
+use tokio::time::{sleep, Duration, Instant};
 
 pub async fn skip_all_enabled(app: &Handler, guild_id: GuildId, manager: Arc<Songbird>) {
     if let Some(handler_lock) = manager.get(guild_id) {
@@ -93,7 +93,8 @@ pub async fn generate_image(
     }
 
     let mut selected_size = None;
-    while selected_size.is_none() {
+    let selection_deadline = Instant::now() + Duration::from_secs(120);
+    while selected_size.is_none() && Instant::now() < selection_deadline {
         for emoji in &sizes {
             let reaction_type = ReactionType::Unicode(emoji.to_string());
             if let Ok(users) = bot_msg
@@ -117,7 +118,10 @@ pub async fn generate_image(
     }
 
     let _ = bot_msg.delete(&ctx).await;
-    let size = selected_size.unwrap().to_string();
+    let Some(size) = selected_size else {
+        return Err("Image size selection timed out.".to_owned());
+    };
+    let size = size.to_string();
 
     let bot_msg_2 = msg
         .reply(&ctx, "Generating...")
@@ -187,18 +191,22 @@ pub async fn say_queue(msg: Message, ctx: &Context, queue: VecDeque<Node>) {
 
     for (index, item) in queue.iter().enumerate() {
         tracker = true;
-        let title = get_video_title(&item.url).await.unwrap();
-        let final_title = title.trim();
+        let final_title = match get_video_title(&item.url).await {
+            Ok(title) => title.trim().to_owned(),
+            Err(why) => {
+                println!("Error getting queued video title: {:?}", why);
+                format!("{} (title unavailable)", item.url)
+            }
+        };
         name_str.push_str(&format!("{}: {}\n", index + 1, final_title));
     }
     name_str.push_str("```");
 
     if tracker {
-        msg.channel_id.say(&ctx.http, name_str).await.unwrap();
-    } else {
-        msg.channel_id
-            .say(&ctx.http, "🪹 **Queue Empty** 🪹")
-            .await
-            .unwrap();
+        if let Err(why) = send_large_message(ctx, msg.channel_id, &name_str).await {
+            println!("Error sending queue message: {:?}", why);
+        }
+    } else if let Err(why) = msg.channel_id.say(&ctx.http, "🪹 **Queue Empty** 🪹").await {
+        println!("Error sending empty queue message: {:?}", why);
     }
 }

@@ -1,4 +1,3 @@
-use regex::Regex;
 use serenity::{client::Context, model::prelude::ChannelId};
 use songbird::input::{ChildContainer, Input, RawAdapter};
 use std::{
@@ -9,29 +8,68 @@ use std::{
 use symphonia_core::io::ReadOnlySource;
 use tokio::process::Command as TokioCommand;
 
-pub fn extract_youtube_url(input: &str) -> Result<&str, Box<dyn std::error::Error + Send>> {
-    let start_index = input.find("https://www.youtube.com/watch?v=");
-    match start_index {
-        Some(start) => {
-            let potential_url = &input[start..];
-            if is_valid_youtube_url(potential_url) {
-                return Ok(potential_url);
-            }
-            Err(Box::new(std::io::Error::new(
-                std::io::ErrorKind::Other,
-                "No valid YouTube URL found",
-            )))
-        }
-        None => Err(Box::new(std::io::Error::new(
-            std::io::ErrorKind::Other,
-            "No valid YouTube URL found",
-        ))),
-    }
+pub fn extract_youtube_url(input: &str) -> Result<&str, Box<dyn std::error::Error + Send + Sync>> {
+    input
+        .split_whitespace()
+        .map(trim_url_token)
+        .find(|token| is_valid_youtube_url(token))
+        .ok_or_else(|| youtube_url_error().into())
+}
+
+fn youtube_url_error() -> io::Error {
+    io::Error::new(io::ErrorKind::InvalidInput, "No valid YouTube URL found")
+}
+
+fn trim_url_token(token: &str) -> &str {
+    token
+        .trim_end_matches(['.', ',', ';', '!', '?'])
+        .trim_matches(|c| matches!(c, '<' | '>' | '(' | ')' | '[' | ']' | '{' | '}'))
+        .trim_end_matches(['.', ',', ';', '!', '?'])
 }
 
 pub fn is_valid_youtube_url(url: &str) -> bool {
-    let re = Regex::new(r"https?://(www\.)?youtube\.com/watch\?v=[a-zA-Z0-9_-]+").unwrap();
-    return re.is_match(url);
+    let Some(rest) = url
+        .strip_prefix("https://")
+        .or_else(|| url.strip_prefix("http://"))
+    else {
+        return false;
+    };
+    let rest = rest.strip_prefix("www.").unwrap_or(rest);
+
+    if let Some(query) = rest.strip_prefix("youtube.com/watch?") {
+        return query.split('&').any(|part| {
+            part.strip_prefix("v=")
+                .map(valid_youtube_id)
+                .unwrap_or(false)
+        });
+    }
+
+    if let Some(path) = rest.strip_prefix("youtu.be/") {
+        return first_path_segment(path)
+            .map(valid_youtube_id)
+            .unwrap_or(false);
+    }
+
+    if let Some(path) = rest.strip_prefix("youtube.com/shorts/") {
+        return first_path_segment(path)
+            .map(valid_youtube_id)
+            .unwrap_or(false);
+    }
+
+    false
+}
+
+fn first_path_segment(path: &str) -> Option<&str> {
+    path.split(['?', '&', '/'])
+        .next()
+        .filter(|segment| !segment.is_empty())
+}
+
+fn valid_youtube_id(id: &str) -> bool {
+    id.len() == 11
+        && id
+            .bytes()
+            .all(|b| b.is_ascii_alphanumeric() || b == b'_' || b == b'-')
 }
 
 const YTDLP_NOT_FOUND: &str =
@@ -60,12 +98,9 @@ fn ytdlp_failure(action: &str, output: &std::process::Output) -> io::Error {
     let message = stderr.trim();
 
     if message.is_empty() {
-        io::Error::new(io::ErrorKind::Other, format!("yt-dlp failed to {action}"))
+        io::Error::other(format!("yt-dlp failed to {action}"))
     } else {
-        io::Error::new(
-            io::ErrorKind::Other,
-            format!("yt-dlp failed to {action}: {message}"),
-        )
+        io::Error::other(format!("yt-dlp failed to {action}: {message}"))
     }
 }
 
@@ -78,11 +113,12 @@ fn parse_duration_part(part: &str) -> io::Result<u64> {
     })
 }
 
-pub async fn get_video_title(video_url: &String) -> Result<String, io::Error> {
-    let output = Command::new("yt-dlp")
+pub async fn get_video_title(video_url: &str) -> Result<String, io::Error> {
+    let output = TokioCommand::new("yt-dlp")
         .arg("--get-title")
         .arg(video_url)
         .output()
+        .await
         .map_err(map_ytdlp_start_error)?;
 
     if !output.status.success() {
@@ -94,10 +130,11 @@ pub async fn get_video_title(video_url: &String) -> Result<String, io::Error> {
 }
 
 pub async fn get_video_duration(video_url: &str) -> io::Result<Duration> {
-    let output = Command::new("yt-dlp")
+    let output = TokioCommand::new("yt-dlp")
         .arg("--get-duration")
         .arg(video_url)
         .output()
+        .await
         .map_err(map_ytdlp_start_error)?;
 
     if !output.status.success() {
@@ -106,7 +143,7 @@ pub async fn get_video_duration(video_url: &str) -> io::Result<Duration> {
 
     let duration_str = String::from_utf8(output.stdout)
         .map_err(|error| io::Error::new(io::ErrorKind::InvalidData, error))?;
-    let duration_parts: Vec<&str> = duration_str.trim().split(":").collect();
+    let duration_parts: Vec<&str> = duration_str.trim().split(':').collect();
 
     match duration_parts.as_slice() {
         [hrs, mins, secs] => Ok(Duration::from_secs(
@@ -184,7 +221,17 @@ pub async fn send_large_message(
     channel_id: ChannelId,
     message: &str,
 ) -> serenity::Result<()> {
-    let max_length = 1950;
+    for part in split_large_message(message, 1950) {
+        channel_id.say(&ctx.http, part).await?;
+    }
+
+    Ok(())
+}
+
+fn split_large_message(message: &str, max_length: usize) -> Vec<&str> {
+    assert!(max_length > 0);
+
+    let mut parts = Vec::new();
     let mut start = 0;
 
     while start < message.len() {
@@ -206,15 +253,31 @@ pub async fn send_large_message(
         }
 
         while start < end {
-            let message_part_end = std::cmp::min(start + max_length, end);
-            let part = &message[start..message_part_end];
-            channel_id.say(&ctx.http, part).await?;
-
+            let requested_end = std::cmp::min(start + max_length, end);
+            let message_part_end = previous_char_boundary(message, start, requested_end);
+            parts.push(&message[start..message_part_end]);
             start = message_part_end;
         }
     }
 
-    Ok(())
+    parts
+}
+
+fn previous_char_boundary(message: &str, start: usize, requested_end: usize) -> usize {
+    let mut end = requested_end.min(message.len());
+    while end > start && !message.is_char_boundary(end) {
+        end -= 1;
+    }
+
+    if end == start {
+        message[start..]
+            .char_indices()
+            .nth(1)
+            .map(|(offset, _)| start + offset)
+            .unwrap_or(message.len())
+    } else {
+        end
+    }
 }
 
 pub async fn get_searched_url(
@@ -244,4 +307,51 @@ pub async fn get_searched_url(
         .ok_or_else(|| io::Error::new(io::ErrorKind::NotFound, "yt-dlp returned no video id"))?;
 
     Ok(format!("https://www.youtube.com/watch?v={}", video_id))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{extract_youtube_url, is_valid_youtube_url, split_large_message};
+
+    #[test]
+    fn extracts_only_the_youtube_url_token() {
+        let input = "play <https://www.youtube.com/watch?v=dQw4w9WgXcQ&t=10s>, please";
+        assert_eq!(
+            extract_youtube_url(input).unwrap(),
+            "https://www.youtube.com/watch?v=dQw4w9WgXcQ&t=10s"
+        );
+    }
+
+    #[test]
+    fn validates_common_youtube_url_shapes() {
+        assert!(is_valid_youtube_url(
+            "https://www.youtube.com/watch?v=dQw4w9WgXcQ"
+        ));
+        assert!(is_valid_youtube_url(
+            "http://youtube.com/watch?t=1&v=dQw4w9WgXcQ"
+        ));
+        assert!(is_valid_youtube_url("https://youtu.be/dQw4w9WgXcQ"));
+        assert!(is_valid_youtube_url(
+            "https://youtube.com/shorts/dQw4w9WgXcQ?feature=share"
+        ));
+    }
+
+    #[test]
+    fn rejects_non_youtube_urls_and_bad_ids() {
+        assert!(!is_valid_youtube_url(
+            "https://example.com/watch?v=dQw4w9WgXcQ"
+        ));
+        assert!(!is_valid_youtube_url(
+            "https://www.youtube.com/watch?v=short"
+        ));
+        assert!(extract_youtube_url("https://example.com nope").is_err());
+    }
+
+    #[test]
+    fn splits_large_messages_on_char_boundaries() {
+        let message = format!("{}💅{}", "a".repeat(1949), "b".repeat(10));
+        let parts = split_large_message(&message, 1950);
+        assert_eq!(parts.concat(), message);
+        assert!(parts.iter().all(|part| part.len() <= 1950));
+    }
 }
