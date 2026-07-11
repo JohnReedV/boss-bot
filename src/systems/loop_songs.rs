@@ -168,6 +168,11 @@ async fn run_loop_song(
             return Err(Box::new(why));
         }
 
+        {
+            let mut current_song = app.current_song.lock().await;
+            *current_song = Some(node.clone());
+        }
+
         tokio::spawn(async move {
             tracker(
                 ctx_clone,
@@ -183,6 +188,8 @@ async fn run_loop_song(
             _ = sleep(duration + Duration::from_secs(1)) => {
                 iterations += 1;
                 if iterations >= count {
+                    let mut current_song = app.current_song.lock().await;
+                    *current_song = None;
                     return Ok(());
                 }
             }
@@ -192,8 +199,15 @@ async fn run_loop_song(
                     app.skip_tracker.store(true, Ordering::SeqCst);
                     wait_for_tracker_to_stop(app).await;
                 }
+                let mut current_song = app.current_song.lock().await;
+                *current_song = None;
                 return Ok(());
             }
+        }
+
+        {
+            let mut current_song = app.current_song.lock().await;
+            *current_song = None;
         }
     }
 }

@@ -185,28 +185,47 @@ pub async fn generate_image(
     Err("Image response did not include image data.".to_owned())
 }
 
-pub async fn say_queue(msg: Message, ctx: &Context, queue: VecDeque<Node>) {
+pub async fn say_queue(
+    msg: Message,
+    ctx: &Context,
+    current_song: Option<Node>,
+    queue: VecDeque<Node>,
+) {
     let mut name_str = String::from("🎵 **Queue** 🎵\n```markdown\n");
-    let mut tracker = false;
+    let mut has_content = false;
+
+    if let Some(current_song) = current_song.as_ref() {
+        has_content = true;
+        let final_title = queue_title(current_song).await;
+        name_str.push_str(&format!("Currently playing: {}\n", final_title));
+
+        if !queue.is_empty() {
+            name_str.push('\n');
+        }
+    }
 
     for (index, item) in queue.iter().enumerate() {
-        tracker = true;
-        let final_title = match get_video_title(&item.url).await {
-            Ok(title) => title.trim().to_owned(),
-            Err(why) => {
-                println!("Error getting queued video title: {:?}", why);
-                format!("{} (title unavailable)", item.url)
-            }
-        };
+        has_content = true;
+        let final_title = queue_title(item).await;
         name_str.push_str(&format!("{}: {}\n", index + 1, final_title));
     }
     name_str.push_str("```");
 
-    if tracker {
+    if has_content {
         if let Err(why) = send_large_message(ctx, msg.channel_id, &name_str).await {
             println!("Error sending queue message: {:?}", why);
         }
     } else if let Err(why) = msg.channel_id.say(&ctx.http, "🪹 **Queue Empty** 🪹").await {
         println!("Error sending empty queue message: {:?}", why);
+    }
+}
+
+async fn queue_title(item: &Node) -> String {
+    match get_video_title(&item.url).await {
+        Ok(title) => title.trim().to_owned(),
+        Err(why) => {
+            println!("Error getting queue video title: {:?}", why);
+            format!("{} (title unavailable)", item.url)
+        }
     }
 }

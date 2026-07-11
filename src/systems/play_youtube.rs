@@ -12,6 +12,7 @@ pub async fn play_youtube(
     msg: Message,
     skip: Arc<AtomicBool>,
     tracking_mutex: Arc<tokio::sync::Mutex<bool>>,
+    current_song: Arc<tokio::sync::Mutex<Option<Node>>>,
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let guild_id = msg.guild_id.ok_or_else(|| {
         io::Error::new(
@@ -45,6 +46,11 @@ pub async fn play_youtube(
         };
 
         track_handle.make_playable_async().await?;
+
+        {
+            let mut current_song = current_song.lock().await;
+            *current_song = Some(node.clone());
+        }
 
         let ctx_clone = ctx.clone();
         tokio::spawn(async move {

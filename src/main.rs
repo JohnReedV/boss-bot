@@ -101,8 +101,12 @@ impl EventHandler for Handler {
             let queue = VIDEO_QUEUE.lock().await;
             let queue_clone = queue.clone();
             drop(queue);
+            let current_song = {
+                let current_song = self.current_song.lock().await;
+                current_song.clone()
+            };
 
-            say_queue(msg.clone(), &ctx, queue_clone).await;
+            say_queue(msg.clone(), &ctx, current_song, queue_clone).await;
         } else if is_exact_command(body, "skip") {
             skip_all_enabled(self, guild_id, manager).await;
         } else if is_exact_command(body, "leave") {
@@ -115,6 +119,10 @@ impl EventHandler for Handler {
             {
                 let mut queue = VIDEO_QUEUE.lock().await;
                 queue.clear();
+            }
+            {
+                let mut current_song = self.current_song.lock().await;
+                *current_song = None;
             }
         } else if is_exact_command(body, "help") {
             delete_command_message(&ctx, &msg).await;

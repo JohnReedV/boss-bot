@@ -137,6 +137,7 @@ pub async fn manage_queue(
                     msg_clone.clone(),
                     skip_tracker_clone,
                     tracker_clone,
+                    app.current_song.clone(),
                 )
                 .await
                 {
@@ -165,6 +166,11 @@ pub async fn manage_queue(
                             wait_for_tracker_to_stop(app).await;
                         }
                     }
+                }
+
+                {
+                    let mut current_song = app.current_song.lock().await;
+                    *current_song = None;
                 }
             }
         }
